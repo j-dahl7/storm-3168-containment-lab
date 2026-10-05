@@ -1,5 +1,7 @@
-// Returns recently ARRIVED terminal events; a successful call is not proof of exfiltration.
+// Automation candidate: one successful sensitive operation; success is not proof of exfiltration.
 // Ingestion time is approximate; submission/event clocks are explicitly marked fallbacks.
+// 20m overlap covers the 5m schedule + 5m platform delay + bounded scheduler jitter.
+// Rule suppression is 30m; denied probes remain available in the hunting query.
 // Source schemas: docs/source-ledger.md S03/S04. NOT TESTED in a live workspace.
 // Replace fictional IDs in a private copy; never broaden the predicate to make it return data.
 let LabResourceGroupId = "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab";
@@ -18,8 +20,8 @@ AzureActivity
 | extend ArrivalTime = coalesce(ingestion_time(), EventSubmissionTimestamp, TimeGenerated),
     ArrivalClock = case(isnotnull(ingestion_time()), "workspace_ingestion",
                         isnotnull(EventSubmissionTimestamp), "provider_submission", "event_time_fallback")
-| where ArrivalTime > ago(5m)
-| where tolower(ActivityStatusValue) in ("success", "succeeded", "failed", "failure")
+| where ArrivalTime > ago(20m) and ArrivalTime <= now()
+| where tolower(ActivityStatusValue) in ("success", "succeeded")
 | where tolower(OperationNameValue) in (
     "microsoft.storage/storageaccounts/listkeys/action",
     "microsoft.storage/storageaccounts/regeneratekey/action",
@@ -27,6 +29,10 @@ AzureActivity
     "microsoft.authorization/locks/delete")
 | where isnotempty(EventDataId)
 | summarize arg_max(ArrivalTime, *) by EventDataId
+| extend SignalPriority = case(tolower(OperationNameValue) endswith "/delete", 3,
+                              tolower(OperationNameValue) endswith "/regeneratekey/action", 2, 1)
+| order by SignalPriority desc, TimeGenerated asc, EventDataId asc
+| take 1
 | project TimeGenerated, ArrivalTime, ArrivalClock, EventSubmissionTimestamp, LabId = ConfiguredLabId,
     ActorObjectId = ActorOid, CallerIpAddress, ResourceId, OperationNameValue,
     ActivityStatusValue, ActivitySubstatusValue, CorrelationId, OperationId, EventDataId

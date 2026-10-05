@@ -1,729 +1,242 @@
 {
   "schema_version": 1,
   "synthetic": false,
-  "description": "Planned trial inventory; not evidence",
+  "description": "Core study planning template; never a result ledger",
+  "study_scope": "core",
+  "extended_catalog": "test-matrix.extended.json",
+  "core_case_count": 12,
+  "action_configuration_count": 13,
+  "minimum_independent_trials": 39,
   "cases": [
     {
-      "case_id": "V01",
+      "case_id": "CORE01",
       "phase": 1,
-      "action": "baseline",
+      "action": "visibility-baseline",
       "credential_class": "fixed_arm_token",
-      "capability": "arm-read",
+      "capability": "arm-read; arm-tag-write; listkeys",
+      "action_configurations": [
+        {
+          "configuration": "visibility-baseline",
+          "minimum_independent_trials": 3,
+          "completed_trials": 0,
+          "status": "not_tested"
+        }
+      ],
       "minimum_independent_trials": 3,
       "completed_trials": 0,
       "status": "not_tested",
       "observations": []
     },
     {
-      "case_id": "V02",
-      "phase": 1,
-      "action": "baseline",
+      "case_id": "CORE02",
+      "phase": 2,
+      "action": "direct-role-delete",
       "credential_class": "fixed_arm_token",
-      "capability": "arm-tag-write",
+      "capability": "arm-tag-write with separate Reader retained",
+      "action_configurations": [
+        {
+          "configuration": "direct-role-delete",
+          "minimum_independent_trials": 3,
+          "completed_trials": 0,
+          "status": "not_tested"
+        }
+      ],
       "minimum_independent_trials": 3,
       "completed_trials": 0,
       "status": "not_tested",
       "observations": []
     },
     {
-      "case_id": "V03",
-      "phase": 1,
-      "action": "baseline",
+      "case_id": "CORE03",
+      "phase": 2,
+      "action": "group-role-assignment-delete",
+      "credential_class": "fixed_arm_token",
+      "capability": "arm-tag-write with separate Reader retained",
+      "action_configurations": [
+        {
+          "configuration": "group-role-assignment-delete",
+          "minimum_independent_trials": 3,
+          "completed_trials": 0,
+          "status": "not_tested"
+        }
+      ],
+      "minimum_independent_trials": 3,
+      "completed_trials": 0,
+      "status": "not_tested",
+      "observations": []
+    },
+    {
+      "case_id": "CORE04",
+      "phase": 2,
+      "action": "group-member-remove",
+      "credential_class": "fixed_arm_token",
+      "capability": "arm-tag-write with separate Reader retained",
+      "action_configurations": [
+        {
+          "configuration": "group-member-remove",
+          "minimum_independent_trials": 3,
+          "completed_trials": 0,
+          "status": "not_tested"
+        }
+      ],
+      "minimum_independent_trials": 3,
+      "completed_trials": 0,
+      "status": "not_tested",
+      "observations": []
+    },
+    {
+      "case_id": "CORE05",
+      "phase": 2,
+      "action": "sp-disable",
+      "credential_class": "fixed_arm_token",
+      "capability": "ARM capability; separately recorded new-token control",
+      "action_configurations": [
+        {
+          "configuration": "sp-disable",
+          "minimum_independent_trials": 3,
+          "completed_trials": 0,
+          "status": "not_tested"
+        }
+      ],
+      "minimum_independent_trials": 3,
+      "completed_trials": 0,
+      "status": "not_tested",
+      "observations": []
+    },
+    {
+      "case_id": "CORE06",
+      "phase": 2,
+      "action": "secret-remove",
+      "credential_class": "fixed_arm_token",
+      "capability": "ARM capability; separately recorded new-token control",
+      "action_configurations": [
+        {
+          "configuration": "secret-remove",
+          "minimum_independent_trials": 3,
+          "completed_trials": 0,
+          "status": "not_tested"
+        }
+      ],
+      "minimum_independent_trials": 3,
+      "completed_trials": 0,
+      "status": "not_tested",
+      "observations": []
+    },
+    {
+      "case_id": "CORE07",
+      "phase": 3,
+      "action": "account-key-regeneration",
+      "credential_class": "key1; key2; service SAS; account SAS; user-delegation SAS; Entra Blob control",
+      "capability": "blob-read",
+      "action_configurations": [
+        {
+          "configuration": "rotate-key1",
+          "minimum_independent_trials": 3,
+          "completed_trials": 0,
+          "status": "not_tested"
+        },
+        {
+          "configuration": "rotate-key2",
+          "minimum_independent_trials": 3,
+          "completed_trials": 0,
+          "status": "not_tested"
+        }
+      ],
+      "minimum_independent_trials": 6,
+      "completed_trials": 0,
+      "status": "not_tested",
+      "observations": []
+    },
+    {
+      "case_id": "CORE08",
+      "phase": 3,
+      "action": "disable-shared-key",
+      "credential_class": "same six-class credential matrix",
+      "capability": "blob-read",
+      "action_configurations": [
+        {
+          "configuration": "disable-shared-key",
+          "minimum_independent_trials": 3,
+          "completed_trials": 0,
+          "status": "not_tested"
+        }
+      ],
+      "minimum_independent_trials": 3,
+      "completed_trials": 0,
+      "status": "not_tested",
+      "observations": []
+    },
+    {
+      "case_id": "CORE09",
+      "phase": 4,
+      "action": "manual-executor-exact-role-delete",
+      "credential_class": "guarded_responder_identity",
+      "capability": "exact role deletion and fixed-token capability observation",
+      "action_configurations": [
+        {
+          "configuration": "manual-executor-exact-role-delete",
+          "minimum_independent_trials": 3,
+          "completed_trials": 0,
+          "status": "not_tested"
+        }
+      ],
+      "minimum_independent_trials": 3,
+      "completed_trials": 0,
+      "status": "not_tested",
+      "observations": []
+    },
+    {
+      "case_id": "CORE10",
+      "phase": 4,
+      "action": "native-dispatcher-dry-run",
+      "credential_class": "native_connector_and_dispatcher_identity",
+      "capability": "validate exact alert evidence without invoking mutation",
+      "action_configurations": [
+        {
+          "configuration": "native-dispatcher-dry-run",
+          "minimum_independent_trials": 3,
+          "completed_trials": 0,
+          "status": "not_tested"
+        }
+      ],
+      "minimum_independent_trials": 3,
+      "completed_trials": 0,
+      "status": "not_tested",
+      "observations": []
+    },
+    {
+      "case_id": "CORE11",
+      "phase": 5,
+      "action": "lock-readonly",
       "credential_class": "fixed_arm_token",
       "capability": "listkeys",
+      "action_configurations": [
+        {
+          "configuration": "lock-readonly",
+          "minimum_independent_trials": 3,
+          "completed_trials": 0,
+          "status": "not_tested"
+        }
+      ],
       "minimum_independent_trials": 3,
       "completed_trials": 0,
       "status": "not_tested",
       "observations": []
     },
     {
-      "case_id": "V04",
-      "phase": 1,
-      "action": "baseline",
+      "case_id": "CORE12",
+      "phase": 2,
+      "action": "sp-disable-blob-audience",
       "credential_class": "fixed_blob_token",
-      "capability": "blob-read",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "C1A",
-      "phase": 2,
-      "action": "direct-role-delete",
-      "credential_class": "fixed_arm_token",
-      "capability": "arm-read_or_allowed_canary_write",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "C1B",
-      "phase": 2,
-      "action": "direct-role-delete",
-      "credential_class": "fixed_blob_token",
-      "capability": "blob-read",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "C1N",
-      "phase": 2,
-      "action": "direct-role-delete",
-      "credential_class": "recorded_client_credential",
-      "capability": "new-token-issuance",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "C2A",
-      "phase": 2,
-      "action": "group-role-delete",
-      "credential_class": "fixed_arm_token",
-      "capability": "arm-read_or_allowed_canary_write",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "C2B",
-      "phase": 2,
-      "action": "group-role-delete",
-      "credential_class": "fixed_blob_token",
-      "capability": "blob-read",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "C2N",
-      "phase": 2,
-      "action": "group-role-delete",
-      "credential_class": "recorded_client_credential",
-      "capability": "new-token-issuance",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "C3A",
-      "phase": 2,
-      "action": "group-member-remove",
-      "credential_class": "fixed_arm_token",
-      "capability": "arm-read_or_allowed_canary_write",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "C3B",
-      "phase": 2,
-      "action": "group-member-remove",
-      "credential_class": "fixed_blob_token",
-      "capability": "blob-read",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "C3N",
-      "phase": 2,
-      "action": "group-member-remove",
-      "credential_class": "recorded_client_credential",
-      "capability": "new-token-issuance",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "C4A",
-      "phase": 2,
-      "action": "sp-disable",
-      "credential_class": "fixed_arm_token",
-      "capability": "arm-read_or_allowed_canary_write",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "C4B",
-      "phase": 2,
-      "action": "sp-disable",
-      "credential_class": "fixed_blob_token",
-      "capability": "blob-read",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "C4N",
-      "phase": 2,
-      "action": "sp-disable",
-      "credential_class": "recorded_client_credential",
-      "capability": "new-token-issuance",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "C5A",
-      "phase": 2,
-      "action": "app-deactivate",
-      "credential_class": "fixed_arm_token",
-      "capability": "arm-read_or_allowed_canary_write",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "C5B",
-      "phase": 2,
-      "action": "app-deactivate",
-      "credential_class": "fixed_blob_token",
-      "capability": "blob-read",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "C5N",
-      "phase": 2,
-      "action": "app-deactivate",
-      "credential_class": "recorded_client_credential",
-      "capability": "new-token-issuance",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "C6A",
-      "phase": 2,
-      "action": "secret-remove",
-      "credential_class": "fixed_arm_token",
-      "capability": "arm-read_or_allowed_canary_write",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "C6B",
-      "phase": 2,
-      "action": "secret-remove",
-      "credential_class": "fixed_blob_token",
-      "capability": "blob-read",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "C6N",
-      "phase": 2,
-      "action": "secret-remove",
-      "credential_class": "recorded_client_credential",
-      "capability": "new-token-issuance",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "K11",
-      "phase": 3,
-      "action": "sp-disable",
-      "credential_class": "key1",
-      "capability": "blob-read",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "K12",
-      "phase": 3,
-      "action": "sp-disable",
-      "credential_class": "key2",
-      "capability": "blob-read",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "K13",
-      "phase": 3,
-      "action": "sp-disable",
-      "credential_class": "service_sas_key1",
-      "capability": "blob-read",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "K14",
-      "phase": 3,
-      "action": "sp-disable",
-      "credential_class": "account_sas_key2",
-      "capability": "blob-read",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "K15",
-      "phase": 3,
-      "action": "sp-disable",
-      "credential_class": "user_delegation_sas",
-      "capability": "blob-read",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "K16",
-      "phase": 3,
-      "action": "sp-disable",
-      "credential_class": "fixed_blob_token",
-      "capability": "blob-read",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "K21",
-      "phase": 3,
-      "action": "rotate-key1",
-      "credential_class": "key1",
-      "capability": "blob-read",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "K22",
-      "phase": 3,
-      "action": "rotate-key1",
-      "credential_class": "key2",
-      "capability": "blob-read",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "K23",
-      "phase": 3,
-      "action": "rotate-key1",
-      "credential_class": "service_sas_key1",
-      "capability": "blob-read",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "K24",
-      "phase": 3,
-      "action": "rotate-key1",
-      "credential_class": "account_sas_key2",
-      "capability": "blob-read",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "K25",
-      "phase": 3,
-      "action": "rotate-key1",
-      "credential_class": "user_delegation_sas",
-      "capability": "blob-read",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "K26",
-      "phase": 3,
-      "action": "rotate-key1",
-      "credential_class": "fixed_blob_token",
-      "capability": "blob-read",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "K31",
-      "phase": 3,
-      "action": "rotate-key2",
-      "credential_class": "key1",
-      "capability": "blob-read",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "K32",
-      "phase": 3,
-      "action": "rotate-key2",
-      "credential_class": "key2",
-      "capability": "blob-read",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "K33",
-      "phase": 3,
-      "action": "rotate-key2",
-      "credential_class": "service_sas_key1",
-      "capability": "blob-read",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "K34",
-      "phase": 3,
-      "action": "rotate-key2",
-      "credential_class": "account_sas_key2",
-      "capability": "blob-read",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "K35",
-      "phase": 3,
-      "action": "rotate-key2",
-      "credential_class": "user_delegation_sas",
-      "capability": "blob-read",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "K36",
-      "phase": 3,
-      "action": "rotate-key2",
-      "credential_class": "fixed_blob_token",
-      "capability": "blob-read",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "K41",
-      "phase": 3,
-      "action": "disable-shared-key",
-      "credential_class": "key1",
-      "capability": "blob-read",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "K42",
-      "phase": 3,
-      "action": "disable-shared-key",
-      "credential_class": "key2",
-      "capability": "blob-read",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "K43",
-      "phase": 3,
-      "action": "disable-shared-key",
-      "credential_class": "service_sas_key1",
-      "capability": "blob-read",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "K44",
-      "phase": 3,
-      "action": "disable-shared-key",
-      "credential_class": "account_sas_key2",
-      "capability": "blob-read",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "K45",
-      "phase": 3,
-      "action": "disable-shared-key",
-      "credential_class": "user_delegation_sas",
-      "capability": "blob-read",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "K46",
-      "phase": 3,
-      "action": "disable-shared-key",
-      "credential_class": "fixed_blob_token",
-      "capability": "blob-read",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "K51",
-      "phase": 3,
-      "action": "revoke-user-delegation-keys-optional",
-      "credential_class": "key1",
-      "capability": "blob-read",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "K52",
-      "phase": 3,
-      "action": "revoke-user-delegation-keys-optional",
-      "credential_class": "key2",
-      "capability": "blob-read",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "K53",
-      "phase": 3,
-      "action": "revoke-user-delegation-keys-optional",
-      "credential_class": "service_sas_key1",
-      "capability": "blob-read",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "K54",
-      "phase": 3,
-      "action": "revoke-user-delegation-keys-optional",
-      "credential_class": "account_sas_key2",
-      "capability": "blob-read",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "K55",
-      "phase": 3,
-      "action": "revoke-user-delegation-keys-optional",
-      "credential_class": "user_delegation_sas",
-      "capability": "blob-read",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "K56",
-      "phase": 3,
-      "action": "revoke-user-delegation-keys-optional",
-      "credential_class": "fixed_blob_token",
-      "capability": "blob-read",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "P1",
-      "phase": 4,
-      "action": "dry-run",
-      "credential_class": "operator_or_managed_identity",
-      "capability": "playbook-exact-target",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "P2",
-      "phase": 4,
-      "action": "wrong-target-refused",
-      "credential_class": "operator_or_managed_identity",
-      "capability": "playbook-exact-target",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "P3",
-      "phase": 4,
-      "action": "exact-role-delete",
-      "credential_class": "operator_or_managed_identity",
-      "capability": "playbook-exact-target",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "P4",
-      "phase": 4,
-      "action": "already-absent",
-      "credential_class": "operator_or_managed_identity",
-      "capability": "playbook-exact-target",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "P5",
-      "phase": 4,
-      "action": "responder-permission-denied",
-      "credential_class": "operator_or_managed_identity",
-      "capability": "playbook-exact-target",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "P6",
-      "phase": 4,
-      "action": "provider-failure",
-      "credential_class": "operator_or_managed_identity",
-      "capability": "playbook-exact-target",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "P7",
-      "phase": 4,
-      "action": "duplicate-invocation",
-      "credential_class": "operator_or_managed_identity",
-      "capability": "playbook-exact-target",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "G1",
-      "phase": 5,
-      "action": "unlocked-delete-optional",
-      "credential_class": "bounded_test_identity",
-      "capability": "operation-specific",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "G2",
-      "phase": 5,
-      "action": "cannotdelete-lock",
-      "credential_class": "bounded_test_identity",
-      "capability": "operation-specific",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "G3",
-      "phase": 5,
-      "action": "readonly-lock-listkeys",
-      "credential_class": "bounded_test_identity",
-      "capability": "operation-specific",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "G4",
-      "phase": 5,
-      "action": "lock-delete-capable-actor-optional",
-      "credential_class": "bounded_test_identity",
-      "capability": "operation-specific",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "G5",
-      "phase": 5,
-      "action": "shared-key-policy-control",
-      "credential_class": "bounded_test_identity",
-      "capability": "operation-specific",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "R1",
-      "phase": 6,
-      "action": "storage-account-recovery-optional",
-      "credential_class": "recovery_operator",
-      "capability": "restore-account_and_read-canary",
-      "minimum_independent_trials": 3,
-      "completed_trials": 0,
-      "status": "not_tested",
-      "observations": []
-    },
-    {
-      "case_id": "R2",
-      "phase": 6,
-      "action": "private-endpoint-recovery-optional",
-      "credential_class": "recovery_operator",
-      "capability": "private-client-canary-read",
+      "capability": "blob-read with independently prepared canary data authorization",
+      "action_configurations": [
+        {
+          "configuration": "sp-disable-blob-audience",
+          "minimum_independent_trials": 3,
+          "completed_trials": 0,
+          "status": "not_tested"
+        }
+      ],
       "minimum_independent_trials": 3,
       "completed_trials": 0,
       "status": "not_tested",
@@ -731,4 +244,3 @@
     }
   ]
 }
-

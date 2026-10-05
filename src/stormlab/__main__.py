@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 from .core import (ACTIONS, CAPABILITIES, AzureCLI, Guard, HTTP, Manifest,
-                   SafetyError, demo_rows, load_json, respond, run_probe, summarize,
+                   SafetyError, demo_rows, load_json, respond, run_probe, summarize, summarize_trial,
                    utc_now)
 
 
@@ -71,7 +71,9 @@ def parser() -> argparse.ArgumentParser:
     demo = sub.add_parser("demo", help="Generate explicitly simulated offline JSONL")
     demo.add_argument("--output", required=True)
     summary = sub.add_parser("summarize", help="Summarize outcomes without claiming action causality")
-    summary.add_argument("--input", required=True)
+    source = summary.add_mutually_exclusive_group(required=True)
+    source.add_argument("--input", help="One probe JSONL, summarized without cross-run stitching")
+    source.add_argument("--trial", help="Trial JSON receipt; checks sibling baseline/action/post files before stitching")
     summary.add_argument("--output")
     for name in ("preflight", "probe", "respond"):
         cmd = sub.add_parser(name, help={"preflight": "Read and verify live ownership only", "probe": "Observe one frozen credential, never refresh it", "respond": "Plan an action; requires --execute and confirmation to mutate"}[name])
@@ -82,6 +84,7 @@ def parser() -> argparse.ArgumentParser:
             cmd.add_argument("--capability", choices=CAPABILITIES, required=True)
             cmd.add_argument("--auth", choices=("bearer", "shared-key", "sas"), default="bearer")
             cmd.add_argument("--token-env", default="STORMLAB_PROBE_TOKEN")
+            cmd.add_argument("--credential-label", help="Random UUID shared only by phases using the same frozen credential")
             cmd.add_argument("--key-env", default="STORMLAB_STORAGE_KEY")
             cmd.add_argument("--sas-env", default="STORMLAB_SAS", help="Read-only HTTPS SAS query only, never a URL; blob-read only")
             cmd.add_argument("--interval", type=float, default=20)
@@ -107,7 +110,16 @@ def main(argv: list[str] | None = None) -> int:
             print("Wrote offline simulated evidence; no Azure calls were made.")
             return 0
         if args.command == "summarize":
-            write_json(Path(args.output) if args.output else None, summarize(read_jsonl(Path(args.input))))
+            if args.trial:
+                path = Path(args.trial)
+                receipt = load_json(path)
+                action_path = path.parent / "action.jsonl"
+                result = summarize_trial(receipt, read_jsonl(path.parent / "baseline.jsonl"),
+                                         read_jsonl(action_path) if action_path.exists() else [],
+                                         read_jsonl(path.parent / "post-action.jsonl"))
+            else:
+                result = summarize(read_jsonl(Path(args.input)))
+            write_json(Path(args.output) if args.output else None, result)
             return 0
         manifest_path = Path(args.manifest)
         root = private_root(manifest_path)
@@ -132,13 +144,13 @@ def main(argv: list[str] | None = None) -> int:
             if not credential:
                 raise SafetyError("Required credential environment variable is empty")
             output = live_output(args.output, root, "probes.jsonl")
-            run_probe(m, http, guard, args.capability, credential, auth=args.auth, interval=args.interval, duration=args.duration, allow_mutation=args.allow_mutation, emit=lambda row: append_jsonl(output, row))
+            run_probe(m, http, guard, args.capability, credential, auth=args.auth, interval=args.interval, duration=args.duration, allow_mutation=args.allow_mutation, credential_label=args.credential_label, emit=lambda row: append_jsonl(output, row))
             print("Bounded probe finished; review evidence for the specific tested capability.")
         else:
             output = live_output(args.output, root, "actions.jsonl")
             row = respond(guard, args.action, execute=args.execute, confirm_lab_id=args.confirm_lab_id, assignment_id=args.role_assignment_id)
             append_jsonl(output, row)
-            print(json.dumps(row, sort_keys=True))
+            print(json.dumps({key: row[key] for key in ("action", "status", "executed")}, sort_keys=True))
             if row["status"] == "failed":
                 return 3
         return 0

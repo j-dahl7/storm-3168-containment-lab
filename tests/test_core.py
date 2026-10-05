@@ -457,7 +457,10 @@ class EvidenceTests(unittest.TestCase):
         self.assertFalse(summarize(denial)["runs"][0]["sustained_denial_observed"])
         rows = [p(0, "allowed")] + denial
         self.assertTrue(summarize(rows)["runs"][0]["sustained_denial_observed"])
-        self.assertFalse(summarize(rows + [p(80, "allowed")])["runs"][0]["sustained_denial_observed"])
+        returned = summarize(rows + [p(80, "allowed")])["runs"][0]
+        self.assertTrue(returned["sustained_denial_observed"])
+        self.assertFalse(returned["sustained_denial_at_end"])
+        self.assertEqual(returned["denial_intervals"][0]["end_reason"], "access_returned")
 
     def test_empty_is_not_tested(self):
         self.assertEqual(summarize([])["status"], "not_tested")

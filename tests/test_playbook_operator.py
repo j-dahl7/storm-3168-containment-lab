@@ -216,6 +216,129 @@ class PlaybookOperatorTests(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             pb.check_workflow(m, state, cloud, Operator(), dry_run=True)
 
+    def test_rg_lookup_failure_after_trigger_does_not_prevent_independent_disable(self):
+        m, state = setup()
+        cloud, clock = FakeCloud(m, state), Clock()
+        def ownership(*args):
+            if cloud.started:
+                raise RuntimeError("Simulated transient resource-group lookup failure")
+        with patch.object(pb, "assert_owned", side_effect=ownership), patch.object(pb, "deploy", side_effect=cloud.deploy), \
+                patch.object(pb, "save", side_effect=cloud.record), patch.object(pb.time, "monotonic", clock.monotonic), \
+                patch.object(pb.time, "sleep", clock.sleep):
+            with self.assertRaisesRegex(RuntimeError, "cleanup is incomplete"):
+                pb.controlled_invoke(m, state, Path("never-written.json"), cloud, Operator(), "invoke", run_timeout=6, cleanup_timeout=6)
+        self.assertEqual(cloud.workflow["properties"]["state"], "Disabled")
+        self.assertTrue(state["disabled_verified"])
+        self.assertFalse(state["safe_configuration_restored"])
+        self.assertIn("safe_configuration_unverified", state["cleanup_problems"])
+        self.assertEqual(state["shutdown"]["outcome"], "disabled_verified")
+        self.assertTrue(any("/disable?" in url for _, url in cloud.calls))
+        self.assertEqual(cloud.deployments, [False])
+
+    def test_no_shutdown_authority_without_prior_live_rg_ownership(self):
+        m, state = setup()
+        cloud = FakeCloud(m, state)
+        with patch.object(pb, "assert_owned", side_effect=RuntimeError("not owned")):
+            with self.assertRaises(RuntimeError):
+                pb.capture_shutdown_proof(m, state, cloud, Operator())
+        self.assertEqual(cloud.calls, [])
+
+    def test_independent_stop_refuses_changed_tag_or_managed_identity(self):
+        for field in ("tag", "identity"):
+            m, state = setup()
+            cloud = FakeCloud(m, state)
+            with patch.object(pb, "assert_owned"):
+                proof = pb.capture_shutdown_proof(m, state, cloud, Operator())
+            if field == "tag":
+                cloud.workflow["tags"] = {}
+            else:
+                cloud.workflow["identity"]["principalId"] = m["actor"]["service_principal_object_id"]
+            with self.assertRaisesRegex(RuntimeError, "ownership drift"):
+                pb.independent_shutdown(proof, state, cloud, Operator(), timeout=0)
+            self.assertFalse(any(method == "POST" for method, _ in cloud.calls))
+            self.assertFalse(state["disabled_verified"])
+            self.assertEqual(state["shutdown"]["outcome"], "unknown")
+
+    def test_stop_target_comes_from_immutable_proof_not_changed_state(self):
+        m, state = setup()
+        cloud = FakeCloud(m, state)
+        with patch.object(pb, "assert_owned"):
+            proof = pb.capture_shutdown_proof(m, state, cloud, Operator())
+        untrusted_state = {**state, "workflow_id": state["workflow_id"] + "-other"}
+        cloud.workflow["properties"]["parameters"]["dryRun"]["value"] = False
+        pb.independent_shutdown(proof, untrusted_state, cloud, Operator(), timeout=0)
+        self.assertTrue(untrusted_state["disabled_verified"])
+        self.assertFalse(any("-other" in url for _, url in cloud.calls))
+
+    def test_lost_disable_response_keeps_ack_and_observation_separate(self):
+        m, state = setup()
+        cloud = FakeCloud(m, state)
+        with patch.object(pb, "assert_owned"):
+            proof = pb.capture_shutdown_proof(m, state, cloud, Operator())
+        original = cloud.request
+        def request(method, url, *args):
+            result = original(method, url, *args)
+            return reply(0, transport_error=True) if "/disable?" in url else result
+        with patch.object(cloud, "request", side_effect=request):
+            pb.independent_shutdown(proof, state, cloud, Operator(), timeout=0)
+        self.assertFalse(state["disable_acknowledged"])
+        self.assertTrue(state["disabled_verified"])
+
+    def test_leaf_get_timeout_still_attempts_captured_exact_disable(self):
+        m, state = setup()
+        cloud = FakeCloud(m, state)
+        with patch.object(pb, "assert_owned"):
+            proof = pb.capture_shutdown_proof(m, state, cloud, Operator())
+        cloud.workflow["properties"]["state"] = "Enabled"
+        original = cloud.request
+        unavailable_once = True
+        def request(method, url, *args):
+            nonlocal unavailable_once
+            if method == "GET" and url == pb.ARM + proof.workflow_id + "?api-version=2019-05-01" and unavailable_once:
+                unavailable_once = False
+                return reply(0, transport_error=True)
+            return original(method, url, *args)
+        with patch.object(cloud, "request", side_effect=request):
+            pb.independent_shutdown(proof, state, cloud, Operator(), timeout=0)
+        self.assertEqual(state["shutdown"]["metadata_read"], "unavailable_using_captured_proof")
+        self.assertTrue(state["disabled_verified"])
+        self.assertEqual(sum("/disable?" in url for _, url in cloud.calls), 1)
+
+    def test_leaf_unavailable_after_stop_never_claims_disabled(self):
+        m, state = setup()
+        cloud = FakeCloud(m, state)
+        with patch.object(pb, "assert_owned"):
+            proof = pb.capture_shutdown_proof(m, state, cloud, Operator())
+        original = cloud.request
+        def request(method, url, *args):
+            if method == "GET" and url == pb.ARM + proof.workflow_id + "?api-version=2019-05-01":
+                return reply(0, transport_error=True)
+            return original(method, url, *args)
+        with patch.object(cloud, "request", side_effect=request):
+            with self.assertRaisesRegex(RuntimeError, "shutdown is unverified"):
+                pb.independent_shutdown(proof, state, cloud, Operator(), timeout=0)
+        self.assertTrue(state["disable_acknowledged"])
+        self.assertFalse(state["disabled_verified"])
+        self.assertEqual(state["shutdown"]["outcome"], "unknown")
+
+    def test_expired_proof_has_no_cross_invocation_authority(self):
+        m, state = setup()
+        cloud, clock = FakeCloud(m, state), Clock()
+        with patch.object(pb, "assert_owned"), patch.object(pb.time, "monotonic", clock.monotonic):
+            proof = pb.capture_shutdown_proof(m, state, cloud, Operator())
+            clock.now = pb.SHUTDOWN_PROOF_SECONDS
+            with self.assertRaisesRegex(RuntimeError, "proof expired"):
+                pb.independent_shutdown(proof, state, cloud, Operator(), timeout=0)
+        self.assertFalse(any(method == "POST" for method, _ in cloud.calls))
+
+    def test_unresolved_shutdown_receipt_blocks_another_invocation(self):
+        m, state = setup()
+        state["cleanup_problems"] = ["workflow_disabled_unverified"]
+        cloud = FakeCloud(m, state)
+        with self.assertRaisesRegex(RuntimeError, "cleanup is unresolved"):
+            pb.controlled_invoke(m, state, Path("never-written.json"), cloud, Operator(), "invoke")
+        self.assertEqual(cloud.calls, [])
+
 
 if __name__ == "__main__":
     unittest.main()

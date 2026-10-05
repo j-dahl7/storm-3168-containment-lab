@@ -155,6 +155,66 @@
         ]
       }
     },
+    "Handle_assignment_read": {
+      "type": "If",
+      "expression": "@equals(outputs('Read_assignment')?['statusCode'], 404)",
+      "actions": {
+        "Record_already_absent": {
+          "type": "Compose",
+          "inputs": {
+            "status": "already_absent_access_unverified",
+            "roleAssignmentId": "@parameters('targetRoleAssignmentId')",
+            "checkedAt": "@utcNow()"
+          }
+        },
+        "Finish_already_absent": {
+          "type": "Terminate",
+          "inputs": {
+            "runStatus": "Succeeded"
+          },
+          "runAfter": {
+            "Record_already_absent": [
+              "Succeeded"
+            ]
+          }
+        }
+      },
+      "else": {
+        "actions": {
+          "Require_assignment_read_success": {
+            "type": "If",
+            "expression": "@equals(outputs('Read_assignment')?['statusCode'], 200)",
+            "actions": {
+              "Assignment_read_ok": {
+                "type": "Compose",
+                "inputs": "assignment_read_succeeded"
+              }
+            },
+            "else": {
+              "actions": {
+                "Stop_unknown_assignment": {
+                  "type": "Terminate",
+                  "inputs": {
+                    "runStatus": "Failed",
+                    "runError": {
+                      "code": "AssignmentReadUnknown",
+                      "message": "Only 404 proves prior absence; no mutation was attempted."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "runAfter": {
+        "Read_assignment": [
+          "Succeeded",
+          "Failed",
+          "TimedOut"
+        ]
+      }
+    },
     "Verify_assignment": {
       "type": "If",
       "expression": "@and(equals(toLower(string(body('Read_assignment')?['id'])), toLower(parameters('targetRoleAssignmentId'))), equals(toLower(string(body('Read_assignment')?['properties']?['principalId'])), toLower(parameters('actorObjectId'))), equals(toLower(string(body('Read_assignment')?['properties']?['roleDefinitionId'])), toLower(parameters('targetRoleDefinitionId'))), equals(toLower(string(body('Read_assignment')?['properties']?['scope'])), toLower(parameters('targetRoleScope'))), equals(body('Read_assignment')?['properties']?['principalType'], 'ServicePrincipal'))",
@@ -179,7 +239,7 @@
         }
       },
       "runAfter": {
-        "Read_assignment": [
+        "Handle_assignment_read": [
           "Succeeded"
         ]
       }

@@ -207,6 +207,20 @@ class WorkflowSafetyTests(unittest.TestCase):
         context['parameters']['executionConfirmation'] = ''
         self.assertEqual(self.assert_no_delete(context).result, 'Failed')
 
+    def test_replayed_incident_with_already_absent_exact_role_is_noop(self):
+        context = fixture(True)
+        context['replies']['Read_assignment'] = {'statusCode': 404}
+        run = self.assert_no_delete(context)
+        self.assertEqual(run.result, 'Succeeded')
+        self.assertEqual(run.composed[-1]['status'], 'already_absent_access_unverified')
+        self.assertTrue(any(name == 'Read_group' for name, _, _ in run.calls))
+
+    def test_initial_assignment_failure_is_never_idempotent_success(self):
+        for reply in ({'statusCode': 403}, {'statusCode': 429}, {'status': 'TimedOut'}):
+            context = fixture(True)
+            context['replies']['Read_assignment'] = reply
+            self.assertEqual(self.assert_no_delete(context).result, 'Failed')
+
     def test_wrong_subscription_or_encoded_path_fails_before_network(self):
         for key, value in [('expectedSubscriptionId', '99999999-9999-4999-8999-999999999999'), ('targetRoleScope', '/other'), ('targetRoleAssignmentId', fixture()['parameters']['targetRoleAssignmentId'] + '%2f')]:
             with self.subTest(key=key):

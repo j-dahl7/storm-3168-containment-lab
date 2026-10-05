@@ -45,8 +45,8 @@ def main():
             utc(row["TimeGenerated"]) >= ref - timedelta(days=1)
             and oid == principal
             and (resource == rg or resource.startswith(rg + "/"))
-            and arrival > ref - timedelta(minutes=5)
-            and row["ActivityStatusValue"].lower() in {"success", "succeeded", "failure", "failed"}
+            and ref - timedelta(minutes=20) < arrival <= ref
+            and row["ActivityStatusValue"].lower() in {"success", "succeeded"}
             and row["OperationNameValue"].lower() in sensitive
             and row["EventDataId"]
         )
@@ -60,7 +60,15 @@ def main():
     assert all(c["minimum_independent_trials"] >= 3 for c in matrix)
     assert all(c["status"] == "not_tested" and c["completed_trials"] == 0
                and c["observations"] == [] for c in matrix)
-    assert set(c["phase"] for c in matrix) == set(range(1, 7))
+    assert len(matrix) == 12
+    assert set(c["phase"] for c in matrix) == set(range(1, 6))
+    assert sum(len(c["action_configurations"]) for c in matrix) == 13
+    assert sum(c["minimum_independent_trials"] for c in matrix) == 39
+    assert all(config["minimum_independent_trials"] == 3
+               for c in matrix for config in c["action_configurations"])
+    extended = documents["fixtures/test-matrix.extended.json"]["cases"]
+    assert len(extended) == 66
+    assert set(c["phase"] for c in extended) == set(range(1, 7))
     with (ROOT / "docs/test-matrix.csv").open(encoding="utf-8", newline="") as stream:
         csv_cases = list(csv.DictReader(stream))
     assert [r["case_id"] for r in csv_cases] == [c["case_id"] for c in matrix]
@@ -101,8 +109,10 @@ def main():
         "synthetic_records_checked": len(fixture["events"]),
         "expected_unique_matches": len(matched_ids),
         "planned_action_cases": len(matrix),
-        "minimum_case_observations": sum(c["minimum_independent_trials"] for c in matrix),
-        "trial_note": "Credential cases may share one action trial; observations are not a count of cloud mutations.",
+        "minimum_independent_core_trials": sum(c["minimum_independent_trials"] for c in matrix),
+        "core_action_configurations": sum(len(c["action_configurations"]) for c in matrix),
+        "extended_optional_cases": len(extended),
+        "trial_note": "Key1 and key2 rotations have separate fresh baselines and three trials each. Credential observations share a configuration trial.",
         "workbook_query_components": len(queries),
         "live_trials_completed": 0,
         "kusto_service_validation": "not_run",

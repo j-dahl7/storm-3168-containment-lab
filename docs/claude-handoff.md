@@ -7,6 +7,12 @@ test plan and `docs/review-checklist.md`. Review code and primary sources, not t
 earlier brainstorming summaries. In particular, 90 minutes is not a documented
 warning-to-wipe interval, and the exposed secret was not confirmed as initial access.
 
+For the current recheck, start with `docs/review-remediation.md`. It maps the
+owner-supplied findings to fixes and reproductions. Check trial-level summary
+linkage, SAS error sanitization, network-policy classification, the emergency
+DISABLE exception, export scope, and the storage baseline lifetime. The new
+source has not been deployed or tested through live response actions.
+
 ## Reproduce the offline checks
 
 ```powershell

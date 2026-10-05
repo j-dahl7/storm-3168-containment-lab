@@ -32,7 +32,10 @@ privately recorded workflow after revalidating its ID and lab tag.
    path/query fragments before any ARM request.
 2. Read the group and require its exact ID and `storm3168LabId` tag.
 3. Read the configured role assignment and require its exact ID, principal ID,
-   role definition, scope and service-principal type.
+   role definition, scope and service-principal type. If that exact GET instead
+   returns 404 after the configuration/group checks, finish with the idempotent
+   `already_absent_access_unverified` outcome and make no deletion attempt. A
+   403, 429, timeout or unreadable result never qualifies as prior absence.
 4. In dry-run mode, record `dry_run_no_mutation` and finish.
 5. Otherwise require the exact execution-confirmation value, then re-read the
    group and assignment immediately before deletion.
@@ -97,6 +100,26 @@ is also not proof of effective containment. A successful trial requires the
 independent resource probe with no token refresh or redirects; its token must
 remain valid throughout the observation period. Expiration, 429, transport
 errors and unknown results are not containment successes.
+
+The operator helper captures an in-memory shutdown proof only after the exact
+resource group's ownership and the Disabled workflow's ID, tag, tenant, managed
+identity and configuration have been verified. In its `finally` block it attempts
+DISABLE before any further group lookup, run discovery or receipt write. That
+one safety operation first tries to re-read the exact workflow's ID, lab tag and
+managed-identity tuple. A successful read showing a mismatch refuses the write.
+An unavailable group or workflow read does not block the one exact DISABLE
+attempt authorized by the captured proof. The proof expires after 15 minutes,
+exists only in the invocation's memory, and is never restored from disk. Enable
+is refused unless sufficient proof lifetime remains for the bounded run and
+shutdown. It authorizes no enable, cancellation, RBAC change or deployment. An
+unverified DISABLE outcome remains **unknown**; even an acknowledged POST needs
+a fresh exact identity and Disabled-state readback before being called disabled.
+
+Disabling only prevents new instances. Known active runs still require separately
+guarded cancellation and terminal-state verification. Restoring dry-run parameters
+still requires a fresh group ownership check. Receipts distinguish the disable
+POST acknowledgment, observed Disabled state, terminal execution and restored
+configuration; any uncertainty prevents another invocation until reconciled.
 
 ## Native Sentinel integration
 

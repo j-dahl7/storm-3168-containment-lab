@@ -108,3 +108,57 @@ trigger invocation and effective-access timing still need live validation.
 
 References: [role assignment condition attributes](https://learn.microsoft.com/en-us/azure/role-based-access-control/conditions-authorization-actions-attributes),
 [conditional delegation examples](https://learn.microsoft.com/en-us/azure/role-based-access-control/delegate-role-assignments-examples).
+
+## Optional subscription Activity Log export
+
+`activity-export.bicep` and its internal subscription module describe a separate,
+disabled-by-default export of the **Administrative** Activity Log category to the
+exact owned lab workspace. The guarded `scripts/activity_export.py` helper issues
+the equivalent exact REST request after live ownership and absence checks. Its
+fresh setting name contains both the lab UUID and a newly recorded export UUID.
+It never updates an existing central setting or redirects an existing workspace
+such as `mcp-lab-law`. It makes no Entra diagnostic or permission changes.
+
+Activity Log diagnostic settings are subscription-scoped. They cannot filter to
+this lab resource group at collection time: the category can include unrelated
+subscription operations, even though downstream KQL is strictly lab-scoped. This
+is a separate opt-in and can add ingestion/retention charges. The quota and lab
+budget target do not establish a dollar cap. Use the existing export for read-only
+analysis when appropriate; do not enable another setting casually.
+
+Offline review:
+
+```powershell
+python scripts/activity_export.py --manifest private/manifest.json
+az bicep build --file infra/activity-export.bicep --stdout | Out-Null
+```
+
+Only after the current source review and explicit live authorization, creation
+uses the selected manifest subscription and lab UUID:
+
+```powershell
+python scripts/activity_export.py --manifest private/manifest.json --operation create `
+  --execute --subscription "<manifest subscription UUID>" `
+  --confirm-lab-id "<manifest lab UUID>" --acknowledge-subscription-wide-export
+```
+
+The helper saves `private/activity-export-state.json` before PUT, rechecks the
+workspace's exact resource ID/tag and requires the exact setting ID to return
+404 twice. An existing setting, 403, timeout or unknown write outcome requires
+reconciliation; it is never overwritten or adopted. The ARM API remains an upsert,
+so serialize operators around the fresh UUID: these checks are not an atomic
+conditional-create guarantee. Successful setting readback proves configuration,
+not event delivery. Allow for source/export ingestion delay and independently
+verify `AzureActivity` rows using `scripts/telemetry.py` before enabling an analytic.
+
+Use `--operation status --execute` with the same subscription/lab confirmations
+for an exact readback. For removal, use `--operation remove --execute` with those
+confirmations. Removal validates the recorded setting's ID, destination and sole
+Administrative category, then requires 404. Remove this export **before** deleting
+its workspace; cleanup does not enumerate or remove it. Do not delete the private
+record while the outcome is unknown. All other subscription exports stay outside
+this helper's allowlist. The internal Bicep module must not be deployed directly;
+the helper also checks the workspace tag, which cannot be used as an early Bicep
+resource condition from an existing resource's runtime properties.
+
+Primary reference: [Microsoft's Activity Log diagnostic-setting template](https://learn.microsoft.com/en-us/azure/azure-monitor/data-collection/resource-manager-diagnostic-settings#diagnostic-setting-for-an-activity-log).

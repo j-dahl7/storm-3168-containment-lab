@@ -2,6 +2,28 @@
 
 Date: 2026-10-05. This is an implementation-readiness record, not the article's results table.
 
+## Review-remediation revision
+
+The owner's independent review identified measurement and shutdown defects in
+the initial implementation. The [remediation tracker](review-remediation.md)
+maps the supplied findings to changes and regression checks. This revision has
+205 passing offline tests (187 harness/operator tests and 18 workflow tests),
+plus artifact validation and ten Bicep-file compilations. Those checks do not
+establish Azure runtime behavior.
+
+The article now includes a core results table, four explanatory vector figures
+and a social cover. The core protocol is 12 cases, 13 configurations and 39
+minimum independent trials. Source-review date labels were removed from the
+unpublished site lab while this revision awaits recheck.
+
+**No Azure changes or new live action runs were performed for these fixes.**
+In particular, the new Activity Log export, revised detector, longer trial
+windows and storage preparation helper have not been exercised live. The
+historical receipts below describe their recorded revisions and do not validate
+the revised code. Claude's recheck precedes the first live response action.
+
+## Historical setup and initial verification
+
 | Area | Evidence | Limit |
 |---|---|---|
 | Python harness/operator helpers | 125 offline tests pass for scope, ownership, credentials, failure classification, group paths, operator shutdown and cleanup. | Mocked provider responses do not establish Azure behavior. |

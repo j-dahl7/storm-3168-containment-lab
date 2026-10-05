@@ -4,7 +4,8 @@ This repository is a defensive Azure lab. Never claim simulated or offline resul
 
 - Keep tokens, keys, SAS values, client secrets, real tenant/subscription IDs and raw tenant evidence out of committed files. Live configuration/evidence belongs in ignored `private/`; credentials stay in process memory or environment only.
 - No cloud deployment or mutation without session authorization, an explicitly selected subscription and a bounded cost plan. Do not infer permission from repository access or a default Azure CLI context. The initial protocol targets under $10, no VMs, bounded polling and resource allowlists. This target is not an Azure-enforced spending cap.
-- Every live mutation must verify exact subscription, resource IDs and a server-side `storm3168LabId` resource-group tag matching the manifest. Never adopt existing resources by stamping a tag.
+- Normal live mutations must verify exact subscription, resource IDs and a server-side `storm3168LabId` resource-group tag matching the manifest. Never adopt existing resources by stamping a tag.
+- The only shutdown exception is one emergency DISABLE for the exact workflow verified before activation in the same invocation. It uses a short-lived immutable in-memory ownership proof; an unavailable RG/leaf lookup must not prevent the stop attempt. A successful leaf read showing identity drift refuses the stop. This exception never permits delete, unlock, cancel, enable, redeploy or RBAC changes; absent readback remains unknown, never safely stopped.
 - Never delete a resource group, subscription, production object or unrecorded resource. Cleanup must use the exact manifest allowlist and revalidate ownership.
 - Fixed-token probes use direct HTTP without token refresh or redirects. Operator authentication is separate from the probe credential.
 - Unknown, expired, throttled and transport-error outcomes are not successful containment. Measure specific capabilities, not a blanket 'attacker stopped'.

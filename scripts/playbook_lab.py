@@ -6,8 +6,10 @@ uncertain cleanup is recorded for explicit reconciliation, never called stopped.
 """
 from __future__ import annotations
 import argparse
+from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
+import math
 import re
 import sys
 import time
@@ -22,6 +24,94 @@ CONFIRMATION = "REMOVE_CONFIGURED_LAB_ROLE"
 ROLE_ACTIONS = {"microsoft.resources/subscriptions/resourcegroups/read",
                 "microsoft.authorization/roleassignments/read",
                 "microsoft.authorization/roleassignments/delete"}
+SHUTDOWN_PROOF_SECONDS = 900
+
+
+class ShutdownIdentityUnavailable(RuntimeError):
+    pass
+
+
+class ShutdownIdentityMismatch(RuntimeError):
+    pass
+
+
+@dataclass(frozen=True)
+class ShutdownProof:
+    """In-memory authority to DISABLE one workflow verified before activation.
+
+    Never load this from disk. It grants no enable, cancellation, configuration,
+    deployment or RBAC action. A readable identity mismatch revokes this proof;
+    unavailable metadata does not prevent the one bounded DISABLE attempt.
+    """
+    workflow_id: str
+    lab_id: str
+    tenant_id: str
+    principal_id: str
+    expires_at: float
+
+
+def capture_shutdown_proof(m: dict, state: dict, http: HTTP, operator: AzureCLI) -> ShutdownProof:
+    assert_owned(m, m["subscription_id"])
+    check_workflow(m, state, http, operator, expected_state="Disabled")
+    return ShutdownProof(workflow_path(m), m["lab_id"], m["tenant_id"], guid(state["responder_object_id"]),
+                         time.monotonic() + SHUTDOWN_PROOF_SECONDS)
+
+
+def read_shutdown_identity(proof: ShutdownProof, http: HTTP, operator: AzureCLI) -> dict:
+    response = call(http, operator, "GET", proof.workflow_id + "?api-version=2019-05-01")
+    if response.status != 200 or response.transport_error:
+        raise ShutdownIdentityUnavailable("Emergency shutdown workflow identity unavailable")
+    item = response.data()
+    identity = item.get("identity", {})
+    if (not isinstance(identity, dict) or str(item.get("id", "")).lower() != proof.workflow_id.lower()
+            or item.get("tags", {}).get("storm3168LabId") != proof.lab_id
+            or identity.get("type") != "SystemAssigned" or identity.get("userAssignedIdentities")
+            or str(identity.get("principalId", "")).lower() != proof.principal_id
+            or str(identity.get("tenantId", "")).lower() != proof.tenant_id):
+        raise ShutdownIdentityMismatch("Emergency shutdown workflow identity or ownership drift")
+    return item
+
+
+def independent_shutdown(proof: ShutdownProof, state: dict, http: HTTP, operator: AzureCLI,
+                         *, timeout: float = 60) -> None:
+    """Least-authority stop, independent of metadata availability and disk I/O.
+
+    A live target's changed execution parameters cannot block its shutdown; only
+    the previously verified ID, tag and managed-identity tuple authorizes DISABLE.
+    A successful mismatch aborts; an unavailable leaf read still allows one exact
+    DISABLE while the in-memory proof is valid. Unknown outcomes remain unknown.
+    """
+    state.update(disable_acknowledged=False, disabled_verified=False)
+    state["shutdown"] = {"attempted_at": stamp(), "authority": "same_invocation_verified_workflow",
+                         "target_identity_verified": False, "outcome": "unknown"}
+    if time.monotonic() >= proof.expires_at:
+        raise RuntimeError("Same-invocation shutdown proof expired; explicit reconciliation required")
+    try:
+        read_shutdown_identity(proof, http, operator)
+        state["shutdown"]["target_identity_verified"] = True
+    except (ShutdownIdentityUnavailable, SafetyError):
+        state["shutdown"]["metadata_read"] = "unavailable_using_captured_proof"
+    # The read may have consumed the remaining bound. Never extend authority by
+    # refreshing proof from an Enabled resource or loading a previous receipt.
+    if time.monotonic() >= proof.expires_at:
+        raise RuntimeError("Same-invocation shutdown proof expired before stop attempt")
+    disabled = call(http, operator, "POST", proof.workflow_id + "/disable?api-version=2016-06-01")
+    state["disable_acknowledged"] = disabled.status in {200, 202, 204} and not disabled.transport_error
+    # Even a lost POST response can be followed by a positive GET observation;
+    # preserve the separate acknowledgment and state-verification facts.
+    deadline = time.monotonic() + timeout
+    while True:
+        try:
+            item = read_shutdown_identity(proof, http, operator)
+            if item.get("properties", {}).get("state") == "Disabled":
+                state["disabled_verified"] = True
+                state["shutdown"].update(outcome="disabled_verified", observed_at=stamp())
+                return
+        except (ShutdownIdentityUnavailable, SafetyError):
+            pass
+        if time.monotonic() >= deadline:
+            raise RuntimeError("Independent workflow shutdown is unverified")
+        time.sleep(min(3, max(0, deadline - time.monotonic())))
 
 
 def stamp() -> str:
@@ -170,9 +260,14 @@ def controlled_invoke(m: dict, state: dict, state_path, http: HTTP, operator: Az
     """One invocation. A disabled Consumption app may still have running instances."""
     if mode not in {"dry-run", "invoke"}:
         raise RuntimeError("Invalid workflow execution mode")
+    if (not math.isfinite(run_timeout) or not math.isfinite(cleanup_timeout)
+            or not 0 < run_timeout <= 300 or not 0 <= cleanup_timeout <= 120):
+        raise RuntimeError("Invocation and cleanup timeouts exceed the bounded proof window")
     if state.get("execution_state_unknown"):
         raise RuntimeError("Previous execution is unresolved; reconcile before another invocation")
-    check_workflow(m, state, http, operator, expected_state="Disabled")
+    if state.get("cleanup_problems"):
+        raise RuntimeError("Previous shutdown/configuration cleanup is unresolved; reconcile its private receipt before another invocation")
+    shutdown_proof = capture_shutdown_proof(m, state, http, operator)
     verify_grants(m, state, http, operator)
     try:
         previous = read_runs(state, http, operator)
@@ -200,6 +295,8 @@ def controlled_invoke(m: dict, state: dict, state_path, http: HTTP, operator: Az
             state["execution_state_unknown"] = True
             raise RuntimeError("Run inventory changed before enable")
         assert_owned(m, m["subscription_id"])
+        if shutdown_proof.expires_at - time.monotonic() < run_timeout + cleanup_timeout + 30:
+            raise RuntimeError("Insufficient shutdown-proof lifetime to enable this workflow")
         enabled = call(http, operator, "POST", base + "/enable?api-version=2016-06-01")
         if enabled.status not in {200, 202, 204} or enabled.transport_error:
             raise RuntimeError("Workflow enable is unconfirmed")
@@ -222,23 +319,19 @@ def controlled_invoke(m: dict, state: dict, state_path, http: HTTP, operator: Az
         if state["last_run"]["status"] != "Succeeded":
             raise RuntimeError("Workflow did not reach a successful terminal status")
     finally:
-        # Disable first to stop new instances; this does NOT cancel active runs.
+        # Attempt DISABLE before any separate RG lookup, run discovery, local
+        # persistence, cancellation or restorative deployment. The in-memory
+        # proof was captured while ownership and Disabled were verified, before
+        # enable. This exception authorizes only a fresh exact-target DISABLE.
+        # Disabling does NOT cancel active runs or prove containment.
         try:
-            assert_owned(m, m["subscription_id"])
-            disabled = call(http, operator, "POST", base + "/disable?api-version=2016-06-01")
-            state["disable_acknowledged"] = disabled.status in {200, 202, 204} and not disabled.transport_error
-            deadline = time.monotonic() + cleanup_timeout
-            while time.monotonic() < deadline:
-                try:
-                    check_workflow(m, state, http, operator, expected_state="Disabled")
-                    state["disabled_verified"] = True
-                    break
-                except (RuntimeError, SafetyError):
-                    time.sleep(3)
-            if not state["disabled_verified"]:
-                cleanup_errors.append("workflow_disabled_unverified")
+            independent_shutdown(shutdown_proof, state, http, operator, timeout=cleanup_timeout)
         except (RuntimeError, SafetyError, ValueError, KeyError):
             cleanup_errors.append("workflow_disabled_unverified")
+        try:
+            save(state_path, state)
+        except (OSError, RuntimeError, ValueError):
+            cleanup_errors.append("shutdown_receipt_persistence_failed")
         try:
             if trigger_attempted and not state["last_run"]["name"] and not state["execution_state_unknown"]:
                 deadline = time.monotonic() + cleanup_timeout
@@ -273,6 +366,7 @@ def controlled_invoke(m: dict, state: dict, state_path, http: HTTP, operator: Az
         # complete inventory has no extra runs, and disable is GET-verified.
         if state["disabled_verified"] and not state["execution_state_unknown"]:
             try:
+                assert_owned(m, m["subscription_id"])
                 deploy(m, state, dry_run=True)
                 check_workflow(m, state, http, operator, dry_run=True, expected_state="Disabled")
                 state["safe_configuration_restored"] = True

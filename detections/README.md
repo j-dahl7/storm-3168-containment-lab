@@ -8,8 +8,9 @@ Status: **source-reviewed and packaged; not run in a live workspace**. Queries u
 | 01-actor-activity.kql | Fixed actor's control-plane timeline |
 | 02-sp-signins.kql | Exact actor/tenant authentication timeline |
 | 03-arrival-delay.kql | Event/submission/ingestion differences |
-| 04-sensitive-operations.kql | Recently arrived terminal ListKeys, key regeneration, account deletion or lock-deletion events |
+| 04-sensitive-operations.kql | One recently arrived successful ListKeys, key regeneration, account deletion or lock-deletion candidate |
 | 05-repeated-sensitive-operations.kql | Repeated control-plane activity, with explicit threshold and bucket limits |
+| 06-denied-sensitive-operations.kql | Failed/denied attempts aggregated for hunting, without an automation binding |
 | replay-sensitive-operations.kql | Offline/synthetic KQL fixture demonstration; no provider table required |
 | sentinel-rule.arm.json | Native Scheduled analytic resource, disabled by default |
 
@@ -17,7 +18,11 @@ Status: **source-reviewed and packaged; not run in a live workspace**. Queries u
 
 Use the service-principal **object ID**, not its application/client ID. Claims object-ID fields take precedence over Caller; ambiguous/missing matching evidence yields no match. The exact normalized resource-group ID plus slash-boundary prefix prevents a similarly named sibling group from matching. No subscription-wide wildcard is supplied.
 
-TimeGenerated is provider event time. EventSubmissionTimestamp is a distinct provider submission/availability field. ingestion_time() is approximate workspace ingestion, nullable and not a globally ordered clock. The alert query uses a five-minute arrival gate within a one-day source lookback. Rows later than that source horizon will be missed; interrupted schedules can also miss windows. Overlap/fallback clocks and repeated ingestion can produce duplicates. This is not exactly-once detection. EventDataId is exposed for deduplication.
+TimeGenerated is provider event time. EventSubmissionTimestamp is a distinct provider submission/availability field. ingestion_time() is approximate workspace ingestion, nullable and not a globally ordered clock. The alert query uses a **20-minute arrival gate**, a five-minute schedule, and a one-day source lookback. This intentionally overlaps executions: it allows for the scheduled-rule platform delay and a bounded amount of scheduler jitter. An event ingested quickly can fall beyond one execution's event-time horizon; the older five-minute arrival gate could discard it on the next execution. The independent scheduler regression tests include that counterexample, a skipped run and ten minutes of extra delay. These local tests model the documented timing contract; they do not execute Kusto or prove every possible platform delay.
+
+The automation rule only considers **successful terminal** sensitive operations from the exact lab actor and group. It ranks destructive operations before key operations and selects one candidate. Failed/denied attempts remain in the actor timeline and `06-denied-sensitive-operations.kql`; they are deliberately not automatic-response candidates. This avoids repeated post-response denied probes activating the lab playbook, but also means an attacker's first failed ListKeys attempt alone will not activate this rule. Do not present this as complete Storm-3168 detection. The exact actor predicate also excludes operator/responder operations; no responder role-deletion operation is in the sensitive-operation list.
+
+The analytic has 30-minute suppression enabled and one result per evaluation, keeping a burst and the 20-minute overlap from generating an incident for every event under the normal schedule. The chosen representative EventDataId is included for correlation; additional candidates remain in raw logs. This deliberately trades detection of separate operations during that cooldown for a bounded lab automation exercise. Serialize trials and allow cooldown to finish; do not shorten it to manufacture another successful test. An outage beyond the overlap, events older than one day, repeated re-ingestion after suppression, or platform behavior can still cause misses/duplicates. This is not an exactly-once incident-delivery guarantee. The executor treats an already-absent exact configured assignment as an idempotent no-op after configuration and group checks, without claiming access loss.
 
 ResultType in sign-in logs is displayed as received; the schema describes Success/Failure while existing tenants/examples can expose numeric result codes. Do not assume all records use one encoding. AADTenantId is the directory tenant; TenantId in Log Analytics is the workspace identifier. Never substitute one for the other.
 
@@ -34,3 +39,34 @@ The query embedded in the template is generated from 04-sensitive-operations.kql
 A lab UUID-derived explicit rule ID avoids display-name adoption. Inspect any existing rule with the same ID before deployment; ARM upserts are not an ownership guard. Follow root setup/preflight instructions. Enabling a rule is a separate action and causes alert/incident writes and possible ingestion costs. Test read-only KQL first.
 
 The local replay validates predicates only; synthetic records must never be injected into AzureActivity or AADServicePrincipalSignInLogs. Their schema pages do not support the ingestion API. A custom replay table would need its own explicit schema and is not created here.
+
+## Alert and incident timing evidence
+
+First collect the scoped Activity Log export with `scripts/telemetry.py`. The
+separate read-only helper then reads one explicitly selected Sentinel incident
+and its one attributable alert, verifies the exact analytic-rule relationship,
+lab/actor/resource custom details and provider event ID, and joins that event to
+the existing private telemetry file:
+
+```powershell
+python scripts/sentinel_timing.py --manifest private/manifest.json `
+  --subscription "<manifest subscription UUID>" `
+  --incident-id "<exact incident UUID>" --analytic-rule-id "<exact rule UUID>" `
+  --activity-evidence private/provider-telemetry.json --output private/sentinel-timing.json
+```
+
+The helper makes no incident update. Sentinel's incident-alert list API uses a
+read-only POST. Missing/multiple provider matches remain missing/ambiguous.
+`processingEndTime` supplies alert availability; `timeGenerated` is recorded
+separately and is never substituted for alert publishing. Incident creation uses
+`createdTimeUtc`. Negative clock differences remain uncertain instead of being
+clamped or called negative latency. `--include-recorded-responder-run` can add the
+exact run saved by the operator helper, but its incident-to-run difference stays
+**unattributed**: temporal proximity alone does not prove the incident caused it.
+Independent fixed-token measurements remain necessary for access-loss timing.
+Live reads also wait for the current review and explicit live authorization.
+
+References: [scheduled rule delay](https://learn.microsoft.com/en-us/azure/sentinel/scheduled-rules-overview),
+[ingestion-delay handling](https://learn.microsoft.com/en-us/azure/sentinel/ingestion-delay),
+[alert clock definitions](https://learn.microsoft.com/en-us/azure/sentinel/security-alert-schema),
+[incident alert read API](https://learn.microsoft.com/en-us/rest/api/securityinsights/incidents/list-alerts?view=rest-securityinsights-2025-09-01).

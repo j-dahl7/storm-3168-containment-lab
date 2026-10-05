@@ -6,7 +6,6 @@
   "expected_unique_event_ids": [
     "synthetic-event-001",
     "synthetic-event-005",
-    "synthetic-event-007",
     "synthetic-event-008",
     "synthetic-event-010",
     "synthetic-event-014"
@@ -15,7 +14,7 @@
     "SyntheticIngestedAt exists only in this fixture and replay; it is not a provider schema field.",
     "Original scheduled query uses ingestion_time(); replay substitutes SyntheticIngestedAt.",
     "No fixture row is to be uploaded into AzureActivity or AADServicePrincipalSignInLogs.",
-    "ExpectedMatch is the expected predicate result before event-ID deduplication; not a measured provider response."
+    "ExpectedMatch is the expected predicate result before event-ID deduplication; not a measured provider response.",
+    "The automation candidate is successful-only and finally selects one priority event. This fixture checks eligibility before candidate selection; denied events remain hunting-only."
   ]
 }
-

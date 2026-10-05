@@ -1,0 +1,24 @@
+// HUNTING ONLY: failed sensitive attempts are useful evidence, including an
+// attacker's initial ListKeys failure, but routine post-response denied probes
+// must not repeatedly activate the lab response. No analytics binding supplied.
+let LabResourceGroupId = "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab";
+let ActorObjectId = "22222222-2222-4222-8222-222222222222";
+let LabGroup = tolower(trim_end(@"/+", LabResourceGroupId));
+let LabPrefix = strcat(LabGroup, "/");
+AzureActivity
+| where TimeGenerated >= ago(1d)
+| extend ActorOid = tolower(coalesce(
+    tostring(Claims_d["http://schemas.microsoft.com/identity/claims/objectidentifier"]),
+    tostring(Claims_d.oid), Caller))
+| where ActorOid == tolower(ActorObjectId)
+| where tolower(ResourceId) == LabGroup or tolower(ResourceId) startswith LabPrefix
+| where tolower(ActivityStatusValue) in ("failure", "failed")
+| where tolower(OperationNameValue) in (
+    "microsoft.storage/storageaccounts/listkeys/action",
+    "microsoft.storage/storageaccounts/regeneratekey/action",
+    "microsoft.storage/storageaccounts/delete",
+    "microsoft.authorization/locks/delete")
+| extend WorkspaceIngestionTime = ingestion_time()
+| summarize Attempts=count(), FirstEvent=min(TimeGenerated), LastEvent=max(TimeGenerated),
+    LastWorkspaceArrival=max(WorkspaceIngestionTime), ProviderEventIds=make_set(EventDataId, 100)
+    by ActorOid, ResourceId, OperationNameValue, ActivitySubstatusValue

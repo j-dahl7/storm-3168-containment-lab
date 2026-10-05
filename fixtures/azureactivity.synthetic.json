@@ -132,8 +132,8 @@
       "CorrelationId": "55555555-5555-4555-8555-555555555555",
       "EventDataId": "synthetic-event-007",
       "OperationId": "synthetic-operation-007",
-      "CaseId": "failed-lock-delete-visible",
-      "ExpectedMatch": true
+      "CaseId": "failed-lock-delete-hunting-only",
+      "ExpectedMatch": false
     },
     {
       "TimeGenerated": "2026-10-01T10:00:00Z",
@@ -289,4 +289,3 @@
     }
   ]
 }
-

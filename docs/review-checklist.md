@@ -21,6 +21,16 @@ Return: severity; file/line; reproducible trigger; observed or source-derived co
 
 ## Scientific validity
 
+- [ ] Core scope is 12 cases / 13 configurations / 39 minimum trials; key1 and key2 rotations have independent baselines and three trials each.
+- [ ] The 66-case extended catalog is optional; it is not the initial execution workload.
+- [ ] Every Blob/key/SAS trial proves successful actor access before response; closed-firewall or Shared-Key-disabled baseline failures are not revocation.
+- [ ] Storage preparation requires an explicit single source IP, separate Shared Key opt-in and a nonce/checksum canary; no broad allow rule is created.
+- [ ] Preparation's finally restoration and manual receipt-based recovery are reviewed; an interrupted process can leave configuration to reconcile.
+- [ ] Blob trial hold covers baseline, action, full observation and cleanup margin; the 600-second default is not used for a lifetime trial. The explicit hold is at most 7800 seconds and never extended automatically.
+- [ ] RBAC/group defaults use 900 seconds; 300-second observations are short/censored. CORE05/CORE06/CORE12 lifetime claims require explicit until-token-expiry and disclose any 7200-second cap.
+- [ ] Operator seed success is not equated with actor data authorization; no helper silently grants roles.
+- [ ] Core/extended actions remain unrun until required review and execution authorization; source-only lock layout checks are not live results.
+
 - [ ] At least three independent trials per action, fresh valid baseline each time.
 - [ ] Group role removal and member removal are separate.
 - [ ] Token issuance, cached ARM access, Blob OAuth access and copied-key access are separate.
@@ -67,4 +77,3 @@ Return: severity; file/line; reproducible trigger; observed or source-derived co
 - Blocked/partial: preserve exact missing prerequisites and untested rows.
 
 Do not approve live acceptance merely because JSON parses, a template compiles or unit tests pass.
-

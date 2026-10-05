@@ -10,7 +10,26 @@ The selected subscription must be explicit and the manifest must match the serve
 
 Use at least **three independent valid trials per action/configuration**, not three HTTP requests in one run. Restore a working baseline between trials, issue a fresh trial credential, and assign a new trial ID. Keep invalid trials and their reasons. Do not silently replace a failed trial. The CSV matrix records planned minimums, not completed counts.
 
-Several credential/capability rows can be observed within the same action trial. The matrix contains 66 cases and at least 198 case observations; that is not a requirement for 198 separate cloud mutations. Optional rows remain unrun until their prerequisites, cost and action have been selected.
+The core study is 12 cases / 13 action configurations / at least 39 independent valid trials. CORE07 contains separate key1 and key2 configurations, each with a fresh baseline and three trials. Credential observations can share a configuration trial. The former 66-case catalog is retained in test-matrix-extended.csv as optional research, not the initial execution workload.
+
+## Core study
+
+| ID | Action / configuration | Minimum trials |
+| --- | --- | ---: |
+| CORE01 | Visibility baseline: bounded ARM read, tag-write and ListKeys observations | 3 |
+| CORE02 | Direct writer assignment removal; retain independent Reader control | 3 |
+| CORE03 | Group writer assignment removal; retain independent Reader control | 3 |
+| CORE04 | Remove only actor membership in the lab group | 3 |
+| CORE05 | Disable SP; fixed ARM token and separately labelled new-token control | 3 |
+| CORE06 | Remove recorded secret; fixed ARM token and separate issuance control | 3 |
+| CORE07 | Regenerate key1 and key2 as two fresh-baseline configurations | 6 |
+| CORE08 | Shared Key disallow; compare copied-key/SAS and Entra controls | 3 |
+| CORE09 | Manually invoke guarded executor on one exact writer assignment | 3 |
+| CORE10 | Native incident dispatcher dry-run with exact lab evidence | 3 |
+| CORE11 | ReadOnly lock versus fixed-token ListKeys capability | 3 |
+| CORE12 | Disable SP; separately acquired fixed Blob-audience token | 3 |
+
+These are planned runs, not completed results. CORE12 requires independently established canary data authorization. App-level deactivation, user-delegation-key revocation, actual account deletion, privileged lock removal and recovery remain extended/optional. The account-level CanNotDelete versus ancestor-RG assignment layout is a source-review comparison until a separately guarded experiment is accepted; do not represent it as an executed deletion test.
 
 ## Trial protocol
 
@@ -19,8 +38,8 @@ Several credential/capability rows can be observed within the same action trial.
 3. Acquire the intended probe credential once into process memory/environment; record only audience, issue/expiry times and a non-secret local trial label. Never persist a token, key, signature, SAS URI or client secret.
 4. Run an allowed, harmless canary operation until at least two baseline requests succeed. Baseline failure is not successful containment.
 5. At an operator-selected UTC time, apply exactly one response action using the separate operator identity. Save API status/request IDs without credential-bearing bodies.
-6. Reuse the fixed probe credential with direct HTTPS, no redirects, retry-based reauthentication or SDK refresh. The initial default observation window is 180 seconds at 20-second spacing; three minutes is a bounded observation, not a promise that revocation completes within it.
-7. If a documented propagation question remains, predeclare an expanded window and budget before a separate run. Classify persistent access at the deadline as right-censored, not infinite access.
+6. Reuse the fixed probe credential with direct HTTPS, no redirects, retry-based reauthentication or SDK refresh. The live-trial runner defaults to a 900-second post-action window for RBAC assignment deletion and group-membership removal, and 300 seconds for other actions, at 20-second probe spacing. The 300-second window is a short, censored observation only; neither default promises that revocation completes within it. The lower-level probe command requires an explicitly selected duration for this protocol.
+7. For CORE05, CORE06 and CORE12, explicitly select the live-trial runner's --until-token-expiry mode when testing continued access across the frozen credential's remaining lifetime. This mode is capped at 7200 seconds; record whether that cap prevents full-lifetime observation. Predeclare the window and budget before starting, never extend a live trial automatically. Classify persistent access at a short/capped deadline as right-censored, not infinite access. New-token issuance controls remain separate from fixed-token observations.
 8. Stop on token expiry, scope/ownership drift or unexpected mutation. A 401 caused by expiry is not proof the action revoked access. Distinguish 403 authorization from firewall denial; preserve provider error code.
 9. Continue collecting telemetry independently after probing stops. Missing or delayed telemetry does not change the recorded API capability outcome.
 10. Reset only recorded lab objects. Revalidate baseline before the next trial.
@@ -35,7 +54,7 @@ Execute detections/00-visibility.kql, 01-actor-activity.kql and 02-sp-signins.kq
 
 ## Phase 2 — Fixed-token containment
 
-Run separate three-trial series for:
+The core selects the action/audience configurations above. The full catalog describes separate three-trial series for:
 - deletion of one direct RBAC assignment;
 - deletion of one group-based RBAC assignment (other members of that group lose that assignment too);
 - removal of the actor's membership reference from one lab group;
@@ -43,7 +62,7 @@ Run separate three-trial series for:
 - application-level deactivation, if the implemented handler and Graph contract support the intended operation;
 - removal of one recorded application password credential.
 
-For each action, separate three test channels: cached ARM token resource request, cached Blob token request if the actor has applicable data permissions, and an explicitly new token-acquisition attempt. Do not silently substitute new authentication for the cached-token channel.
+Keep cached ARM requests, cached Blob requests and explicitly new token acquisition as separate evidence channels. Run only the channels selected for the core case; other combinations remain extended. Do not silently substitute new authentication for a cached-token channel.
 
 Group membership removal and group-assignment deletion are different rows. Client-secret removal tests the recorded secret only; additional credentials are excluded from the initial lab. Application deactivation must remain not_tested if unavailable: do not infer it from service-principal disablement. Managed-identity cache behavior is outside the initial application-SP scope [S05–S07, S16–S18].
 
@@ -51,7 +70,11 @@ Group membership removal and group-assignment deletion are different rows. Clien
 
 Use synthetic content and isolate each action by returning to baseline. Test key1, key2, service SAS signed by key1, account SAS signed by key2, user-delegation SAS and a fixed Entra Blob token. Verify each works before the response being evaluated.
 
-Measure after: principal disablement; regeneration of key1; regeneration of key2; Shared Key disallow; and, as a separately implemented optional extension, user-delegation-key revocation. Each action needs three independent trials across the available credential classes.
+Use the optional storage baseline in storage-baseline.md to establish the nonce canary and an explicitly allowed source IP. The closed foundation's firewall/Shared-Key denial is not a valid success baseline. Stop additional live work until Claude recheck is accepted. The helper restores original settings after its bounded hold and does not prove actor access by itself.
+
+For every Blob trial, including CORE12, explicitly set --hold-seconds to cover actor baseline establishment, the response action, the complete declared observation window and cleanup margin. The preparation default is only 600 seconds; its maximum is 7800 seconds. A 60–90-minute Blob-token experiment therefore needs a predeclared longer hold. Compare the announced restoration deadline with the proposed trial end before proceeding. Never interpret a denial at or after firewall restoration as proof of credential revocation; if the hold cannot cover the trial, do not start it.
+
+Core configurations are regeneration of key1, regeneration of key2 and Shared Key disallow. Each needs three independent fresh-baseline trials across available credential classes. Principal disablement with copied credentials and user-delegation-key revocation remain optional extensions; do not include them implicitly in the initial workload.
 
 Expected distinctions come from S09–S11; leave outcomes empty until observed. A service principal can lose future sign-in while a copied account key still works. Key regeneration affects signatures made with that key, whereas Shared Key disallow is an authorization setting. Neither removes valid Entra data permissions or prevents ARM account deletion. Broad storage-management roles can ordinarily re-enable Shared Key; an independently governed deny policy is a separate prevention control.
 
