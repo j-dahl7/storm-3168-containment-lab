@@ -65,4 +65,3 @@ G4,5,lock-delete-capable-actor-optional,bounded_test_identity,operation-specific
 G5,5,shared-key-policy-control,bounded_test_identity,operation-specific,3,0,not_tested,,,,See docs/test-plan.md; unavailable or optional capabilities remain not_tested
 R1,6,storage-account-recovery-optional,recovery_operator,restore-account_and_read-canary,3,0,not_tested,,,,See docs/test-plan.md; unavailable or optional capabilities remain not_tested
 R2,6,private-endpoint-recovery-optional,recovery_operator,private-client-canary-read,3,0,not_tested,,,,See docs/test-plan.md; unavailable or optional capabilities remain not_tested
-
