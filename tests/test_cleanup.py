@@ -5,6 +5,7 @@ import io
 import json
 from pathlib import Path
 import sys
+import tempfile
 import unittest
 from unittest.mock import patch
 
@@ -343,10 +344,19 @@ class CleanupTests(unittest.TestCase):
         self.assertEqual(self.cloud.calls, [])
 
     def test_default_cli_plan_has_no_network_or_report_write(self):
-        with patch.object(sys, "argv", ["cleanup_lab.py"]), patch.object(cleanup, "load_inputs", return_value=(self.m, self.state, ROOT / "private")), \
-             patch.object(cleanup, "AzureCLI") as cli, patch.object(cleanup, "HTTP") as http, patch.object(cleanup, "write_report") as save, \
-             contextlib.redirect_stdout(io.StringIO()) as output:
-            self.assertEqual(cleanup.main(), 0)
+        # Exercise the CLI's extra manifest/export reads against an isolated
+        # fictional fixture, never an operator's ignored private directory.
+        with tempfile.TemporaryDirectory() as directory:
+            private = Path(directory).resolve() / "private"
+            private.mkdir()
+            manifest = private / "manifest.json"
+            manifest.write_text((ROOT / "config" / "manifest.example.json").read_text(encoding="utf-8"), encoding="utf-8")
+            with patch.object(sys, "argv", ["cleanup_lab.py", "--manifest", str(manifest)]), \
+                 patch.object(cleanup, "load_inputs", return_value=(self.m, self.state, private)), \
+                 patch.object(cleanup, "AzureCLI") as cli, patch.object(cleanup, "HTTP") as http, patch.object(cleanup, "write_report") as save, \
+                 contextlib.redirect_stdout(io.StringIO()) as output:
+                self.assertEqual(cleanup.main(), 0)
+            self.assertEqual(sorted(p.name for p in private.iterdir()), ["manifest.json"])
         cli.assert_not_called()
         http.assert_not_called()
         save.assert_not_called()

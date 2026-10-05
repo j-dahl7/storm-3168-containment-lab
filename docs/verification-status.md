@@ -20,6 +20,13 @@ and preview builds passed, drafts remained excluded from production, and all
 five visuals passed native/Arial/Verdana bounds checks. Desktop and 390px mobile
 preview checks found no broken images or page/table horizontal overflow.
 
+The first remote run of this pass exposed an isolated-test defect: a mocked
+cleanup loader left a second manifest read pointed at the operator's local
+private directory. The CLI test now uses its own fictional temporary manifest.
+Both suites (262 tests) and the fixture validator also passed from a clean Git
+archive with no operator manifest or retained lab files. No cloud behavior changed
+in that correction.
+
 No Azure calls or mutations were made for this pass. CORE12 now has an explicit
 Blob-token path with storage-window checks; live data authorization is still a
 prerequisite. Phase 3 remains a manual multi-credential protocol. Provider event
