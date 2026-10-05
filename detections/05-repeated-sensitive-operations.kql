@@ -1,0 +1,35 @@
+// Source schemas: docs/source-ledger.md S03/S04. NOT TESTED in a live workspace.
+// Replace fictional IDs in a private copy; never broaden the predicate to make it return data.
+let LabResourceGroupId = "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab";
+let ActorObjectId = "22222222-2222-4222-8222-222222222222";
+let LabGroup = tolower(trim_end(@"/+", LabResourceGroupId));
+let LabPrefix = strcat(LabGroup, "/");
+// A repeated-operation triage signal, not a native Storm-3168 detector.
+// Count unique operation IDs where present; never count Started and Succeeded as two calls.
+// Fixed 10-minute buckets have boundary effects; overlapping scheduled windows can repeat results.
+let MinimumOperations = 3;
+AzureActivity
+| where TimeGenerated > ago(30m)
+| extend ActorOid = tolower(coalesce(
+    tostring(Claims_d["http://schemas.microsoft.com/identity/claims/objectidentifier"]),
+    tostring(Claims_d.oid), Caller))
+| where ActorOid == tolower(ActorObjectId)
+| extend NormalizedResourceId = tolower(ResourceId)
+| where NormalizedResourceId == LabGroup or NormalizedResourceId startswith LabPrefix
+| where tolower(ActivityStatusValue) in ("success", "succeeded", "failed", "failure")
+| where tolower(OperationNameValue) in (
+    "microsoft.storage/storageaccounts/listkeys/action",
+    "microsoft.storage/storageaccounts/regeneratekey/action",
+    "microsoft.storage/storageaccounts/delete",
+    "microsoft.authorization/locks/delete")
+| where isnotempty(EventDataId)
+| extend RequestKey=coalesce(OperationId, EventDataId),
+    ArrivalTime=coalesce(ingestion_time(), EventSubmissionTimestamp, TimeGenerated)
+| summarize arg_max(ArrivalTime, *) by EventDataId
+| summarize Operations=dcount(RequestKey), LatestArrival=max(ArrivalTime),
+    Resources=make_set(ResourceId, 20), Outcomes=make_set(ActivityStatusValue, 10),
+    OperationNames=make_set(OperationNameValue, 10), EventIds=make_set(EventDataId, 50)
+    by ActorObjectId=ActorOid, WindowStart=bin(TimeGenerated, 10m)
+| where Operations >= MinimumOperations and LatestArrival > ago(5m)
+| order by WindowStart desc
+

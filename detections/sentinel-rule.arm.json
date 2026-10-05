@@ -1,0 +1,120 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "description": "Optional lab analytic only; no deployment or runtime validation performed.",
+    "querySource": "04-sensitive-operations.kql"
+  },
+  "parameters": {
+    "workspaceName": {
+      "type": "string",
+      "minLength": 4
+    },
+    "labResourceGroupId": {
+      "type": "string",
+      "minLength": 60
+    },
+    "actorObjectId": {
+      "type": "string",
+      "minLength": 36,
+      "maxLength": 36
+    },
+    "ruleId": {
+      "type": "string",
+      "minLength": 36,
+      "maxLength": 36
+    },
+    "enableRule": {
+      "type": "bool",
+      "defaultValue": false
+    },
+    "labId": {
+      "type": "string",
+      "minLength": 36,
+      "maxLength": 36
+    }
+  },
+  "variables": {
+    "queryBody": "AzureActivity\n| where TimeGenerated >= ago(1d)\n| extend ActorOid = tolower(coalesce(\n    tostring(Claims_d[\"http://schemas.microsoft.com/identity/claims/objectidentifier\"]),\n    tostring(Claims_d.oid), Caller))\n| where ActorOid == tolower(ActorObjectId)\n| extend NormalizedResourceId = tolower(ResourceId)\n| where NormalizedResourceId == LabGroup or NormalizedResourceId startswith LabPrefix\n| extend ArrivalTime = coalesce(ingestion_time(), EventSubmissionTimestamp, TimeGenerated),\n    ArrivalClock = case(isnotnull(ingestion_time()), \"workspace_ingestion\",\n                        isnotnull(EventSubmissionTimestamp), \"provider_submission\", \"event_time_fallback\")\n| where ArrivalTime > ago(5m)\n| where tolower(ActivityStatusValue) in (\"success\", \"succeeded\", \"failed\", \"failure\")\n| where tolower(OperationNameValue) in (\n    \"microsoft.storage/storageaccounts/listkeys/action\",\n    \"microsoft.storage/storageaccounts/regeneratekey/action\",\n    \"microsoft.storage/storageaccounts/delete\",\n    \"microsoft.authorization/locks/delete\")\n| where isnotempty(EventDataId)\n| summarize arg_max(ArrivalTime, *) by EventDataId\n| project TimeGenerated, ArrivalTime, ArrivalClock, EventSubmissionTimestamp, LabId = ConfiguredLabId,\n    ActorObjectId = ActorOid, CallerIpAddress, ResourceId, OperationNameValue,\n    ActivityStatusValue, ActivitySubstatusValue, CorrelationId, OperationId, EventDataId\n"
+  },
+  "resources": [
+    {
+      "type": "Microsoft.OperationalInsights/workspaces/providers/alertRules",
+      "apiVersion": "2025-09-01",
+      "name": "[concat(parameters('workspaceName'), '/Microsoft.SecurityInsights/', parameters('ruleId'))]",
+      "kind": "Scheduled",
+      "properties": {
+        "displayName": "LAB Storm-3168 - scoped sensitive control-plane operation",
+        "description": "Lab-only actor/resource scoped terminal operation signal. Not proof of compromise or data exfiltration; no automatic response binding.",
+        "enabled": "[parameters('enableRule')]",
+        "severity": "Medium",
+        "query": "[concat('let LabResourceGroupId = \"', parameters('labResourceGroupId'), '\"; let ActorObjectId = \"', parameters('actorObjectId'), '\"; let LabGroup = tolower(trim_end(@\"/+\", LabResourceGroupId)); let LabPrefix = strcat(LabGroup, \"/\"); ', 'let ConfiguredLabId = \"', parameters('labId'), '\"; ', variables('queryBody'))]",
+        "queryFrequency": "PT5M",
+        "queryPeriod": "P1D",
+        "triggerOperator": "GreaterThan",
+        "triggerThreshold": 0,
+        "suppressionDuration": "PT5M",
+        "suppressionEnabled": false,
+        "eventGroupingSettings": {
+          "aggregationKind": "AlertPerResult"
+        },
+        "incidentConfiguration": {
+          "createIncident": true,
+          "groupingConfiguration": {
+            "enabled": false,
+            "reopenClosedIncident": false,
+            "lookbackDuration": "PT1H",
+            "matchingMethod": "AllEntities"
+          }
+        },
+        "tactics": [
+          "CredentialAccess",
+          "Impact"
+        ],
+        "techniques": [
+          "T1552",
+          "T1485"
+        ],
+        "customDetails": {
+          "ActorObjectId": "ActorObjectId",
+          "ProviderEventId": "EventDataId",
+          "Operation": "OperationNameValue",
+          "Outcome": "ActivityStatusValue",
+          "ArrivalClock": "ArrivalClock",
+          "LabId": "LabId",
+          "ResourceId": "ResourceId"
+        },
+        "entityMappings": [
+          {
+            "entityType": "AzureResource",
+            "fieldMappings": [
+              {
+                "identifier": "ResourceId",
+                "columnName": "ResourceId"
+              }
+            ]
+          },
+          {
+            "entityType": "IP",
+            "fieldMappings": [
+              {
+                "identifier": "Address",
+                "columnName": "CallerIpAddress"
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "outputs": {
+    "ruleId": {
+      "type": "string",
+      "value": "[parameters('ruleId')]"
+    },
+    "enabled": {
+      "type": "bool",
+      "value": "[parameters('enableRule')]"
+    }
+  }
+}

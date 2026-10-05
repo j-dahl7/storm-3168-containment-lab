@@ -1,0 +1,171 @@
+{
+  "version": "Notebook/1.0",
+  "items": [
+    {
+      "type": 1,
+      "content": {
+        "json": "# Storm-3168 containment evidence\n**Live results: NOT TESTED.** Select the exact lab workspace and resource-group/actor IDs, then set the UTC range for one recorded trial. Repeat for each independent trial; this workbook does not infer phase boundaries.\n\nProvider logs measure visibility, not the fixed-credential probe outcome. Missing tables/rows, expiry and delivery latency are not successful containment. No harness JSONL is ingested, and no synthetic cloud tables are assumed. Raw IDs and IPs in query results are private evidence; redact before publication."
+      },
+      "name": "scope-warning"
+    },
+    {
+      "type": 9,
+      "content": {
+        "version": "KqlParameterItem/1.0",
+        "parameters": [
+          {
+            "id": "workspace",
+            "version": "KqlParameterItem/1.0",
+            "name": "Workspace",
+            "type": 5,
+            "isRequired": true,
+            "value": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.OperationalInsights/workspaces/law-storm3168-example",
+            "typeSettings": {
+              "resourceTypeFilter": {
+                "microsoft.operationalinsights/workspaces": true
+              }
+            }
+          },
+          {
+            "id": "group",
+            "version": "KqlParameterItem/1.0",
+            "name": "LabResourceGroupId",
+            "type": 1,
+            "isRequired": true,
+            "value": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab"
+          },
+          {
+            "id": "actor",
+            "version": "KqlParameterItem/1.0",
+            "name": "ActorObjectId",
+            "type": 1,
+            "isRequired": true,
+            "value": "22222222-2222-4222-8222-222222222222"
+          },
+          {
+            "id": "tenant",
+            "version": "KqlParameterItem/1.0",
+            "name": "LabTenantId",
+            "type": 1,
+            "isRequired": true,
+            "value": "33333333-3333-4333-8333-333333333333"
+          },
+          {
+            "id": "trial",
+            "version": "KqlParameterItem/1.0",
+            "name": "TrialLabel",
+            "type": 1,
+            "isRequired": true,
+            "value": "NOT TESTED — select one recorded trial"
+          },
+          {
+            "id": "time",
+            "version": "KqlParameterItem/1.0",
+            "name": "TimeRange",
+            "type": 4,
+            "isRequired": true,
+            "value": {
+              "durationMs": 86400000
+            },
+            "typeSettings": {
+              "selectableValues": [
+                {
+                  "durationMs": 3600000
+                },
+                {
+                  "durationMs": 14400000
+                },
+                {
+                  "durationMs": 86400000
+                }
+              ],
+              "allowCustom": true
+            }
+          }
+        ],
+        "style": "above",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces"
+      },
+      "name": "trial-parameters"
+    },
+    {
+      "type": 1,
+      "content": {
+        "json": "## Selected trial: {TrialLabel}\nPhases: 1 Visibility → 2 Fixed-token containment → 3 Copied keys → 4 Playbook → 5 Prevention → 6 Recovery.\n\nUse the same selected time range in each component. Keep the separate private client-probe timeline beside these provider records. Authentication/ARM correlation IDs are not a universal join key."
+      },
+      "name": "trial-context"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "let LabResourceGroupId = \"{LabResourceGroupId}\";\nlet ActorObjectId = \"{ActorObjectId}\";\nlet LabGroup = tolower(trim_end(@\"/+\", LabResourceGroupId));\nlet LabPrefix = strcat(LabGroup, \"/\");\nAzureActivity\n| extend NormalizedResourceId=tolower(ResourceId)\n| where NormalizedResourceId == LabGroup or NormalizedResourceId startswith LabPrefix\n| extend ActorOid=tolower(coalesce(tostring(Claims_d[\"http://schemas.microsoft.com/identity/claims/objectidentifier\"]),tostring(Claims_d.oid),Caller)),\n    WorkspaceIngestionTime=ingestion_time()\n| project TimeGenerated, EventSubmissionTimestamp, WorkspaceIngestionTime,\n    ActorIsTestPrincipal=(ActorOid == tolower(ActorObjectId)), ActorObjectId=ActorOid,\n    OperationNameValue, ActivityStatusValue, ActivitySubstatusValue,\n    ResourceId, EventDataId, OperationId, CorrelationId\n| order by TimeGenerated asc",
+        "size": 0,
+        "title": "Control-plane timeline — selected trial window",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": [
+          "{Workspace}"
+        ],
+        "timeContextFromParameter": "TimeRange",
+        "visualization": "table"
+      },
+      "name": "evidence-1"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "let LabResourceGroupId = \"{LabResourceGroupId}\";\nlet ActorObjectId = \"{ActorObjectId}\";\nlet LabGroup = tolower(trim_end(@\"/+\", LabResourceGroupId));\nlet LabPrefix = strcat(LabGroup, \"/\");\nAzureActivity\n| extend ActorOid = tolower(coalesce(\n    tostring(Claims_d[\"http://schemas.microsoft.com/identity/claims/objectidentifier\"]),\n    tostring(Claims_d.oid), Caller))\n| where ActorOid == tolower(ActorObjectId)\n| extend NormalizedResourceId = tolower(ResourceId)\n| where NormalizedResourceId == LabGroup or NormalizedResourceId startswith LabPrefix\n| where tolower(ActivityStatusValue) in (\"success\",\"succeeded\",\"failed\",\"failure\")\n| where isnotempty(EventDataId)\n| summarize arg_max(TimeGenerated, *) by EventDataId\n| summarize Records=count(), UniqueOperations=dcount(OperationId)\n    by bin(TimeGenerated, 10m), OperationNameValue, ActivityStatusValue\n| order by TimeGenerated asc",
+        "size": 0,
+        "title": "Repeated actor operations — does not count independent trials",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": [
+          "{Workspace}"
+        ],
+        "timeContextFromParameter": "TimeRange",
+        "visualization": "table"
+      },
+      "name": "evidence-2"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "let ActorObjectId=\"{ActorObjectId}\";\nlet LabTenantId=\"{LabTenantId}\";\nAADServicePrincipalSignInLogs\n| where ServicePrincipalId =~ ActorObjectId and AADTenantId =~ LabTenantId\n| extend WorkspaceIngestionTime=ingestion_time()\n| project TimeGenerated, CreatedDateTime, WorkspaceIngestionTime, ServicePrincipalId,\n    AppId, IPAddress, ResourceDisplayName, ClientCredentialType, ResultType,\n    ResultSignature, ResultDescription, ConditionalAccessStatus, CorrelationId, Id\n| order by CreatedDateTime asc",
+        "size": 0,
+        "title": "Authentication timeline — independent of per-request authorization",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": [
+          "{Workspace}"
+        ],
+        "timeContextFromParameter": "TimeRange",
+        "visualization": "table"
+      },
+      "name": "evidence-3"
+    },
+    {
+      "type": 3,
+      "content": {
+        "version": "KqlItem/1.0",
+        "query": "let LabResourceGroupId = \"{LabResourceGroupId}\";\nlet ActorObjectId = \"{ActorObjectId}\";\nlet LabGroup = tolower(trim_end(@\"/+\", LabResourceGroupId));\nlet LabPrefix = strcat(LabGroup, \"/\");\nAzureActivity\n| extend ActorOid = tolower(coalesce(\n    tostring(Claims_d[\"http://schemas.microsoft.com/identity/claims/objectidentifier\"]),\n    tostring(Claims_d.oid), Caller))\n| where ActorOid == tolower(ActorObjectId)\n| extend NormalizedResourceId = tolower(ResourceId)\n| where NormalizedResourceId == LabGroup or NormalizedResourceId startswith LabPrefix\n| extend WorkspaceIngestionTime=ingestion_time()\n| extend ProviderDelaySeconds=datetime_diff(\"millisecond\",EventSubmissionTimestamp,TimeGenerated)/1000.0,\n    WorkspaceDelaySeconds=datetime_diff(\"millisecond\",WorkspaceIngestionTime,TimeGenerated)/1000.0\n| project TimeGenerated, EventSubmissionTimestamp, WorkspaceIngestionTime,\n    ProviderDelaySeconds, WorkspaceDelaySeconds, OperationNameValue, ActivityStatusValue, EventDataId\n| order by TimeGenerated asc",
+        "size": 0,
+        "title": "Event delivery delay — not access revocation time",
+        "queryType": 0,
+        "resourceType": "microsoft.operationalinsights/workspaces",
+        "crossComponentResources": [
+          "{Workspace}"
+        ],
+        "timeContextFromParameter": "TimeRange",
+        "visualization": "table"
+      },
+      "name": "evidence-4"
+    }
+  ],
+  "fallbackResourceIds": [],
+  "$schema": "https://github.com/microsoft/Application-Insights-Workbooks/blob/master/schema/workbook.json"
+}
+

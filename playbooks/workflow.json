@@ -1,0 +1,457 @@
+{
+  "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "expectedSubscriptionId": {
+      "type": "String"
+    },
+    "labId": {
+      "type": "String"
+    },
+    "resourceGroupId": {
+      "type": "String"
+    },
+    "actorObjectId": {
+      "type": "String"
+    },
+    "targetRoleAssignmentId": {
+      "type": "String"
+    },
+    "targetRoleDefinitionId": {
+      "type": "String"
+    },
+    "targetRoleScope": {
+      "type": "String"
+    },
+    "dryRun": {
+      "type": "Bool",
+      "defaultValue": true
+    },
+    "executionConfirmation": {
+      "type": "String",
+      "defaultValue": ""
+    }
+  },
+  "triggers": {
+    "manual": {
+      "type": "Request",
+      "kind": "Http",
+      "inputs": {
+        "schema": {}
+      },
+      "runtimeConfiguration": {
+        "concurrency": {
+          "runs": 1
+        }
+      }
+    }
+  },
+  "actions": {
+    "Validate_configuration": {
+      "type": "If",
+      "expression": "@and(equals(toLower(split(workflow().id, '/')[2]), toLower(parameters('expectedSubscriptionId'))), equals(toLower(parameters('resourceGroupId')), toLower(concat('/subscriptions/', parameters('expectedSubscriptionId'), '/resourceGroups/', split(workflow().id, '/')[4]))), or(equals(toLower(parameters('targetRoleScope')), toLower(parameters('resourceGroupId'))), startsWith(toLower(parameters('targetRoleScope')), concat(toLower(parameters('resourceGroupId')), '/providers/'))), equals(toLower(parameters('targetRoleAssignmentId')), toLower(concat(parameters('targetRoleScope'), '/providers/Microsoft.Authorization/roleAssignments/', last(split(parameters('targetRoleAssignmentId'), '/'))))), equals(toLower(parameters('targetRoleDefinitionId')), toLower(concat('/subscriptions/', parameters('expectedSubscriptionId'), '/providers/Microsoft.Authorization/roleDefinitions/', last(split(parameters('targetRoleDefinitionId'), '/'))))), equals(length(last(split(parameters('targetRoleAssignmentId'), '/'))), 36), equals(length(last(split(parameters('targetRoleDefinitionId'), '/'))), 36), equals(length(parameters('actorObjectId')), 36), equals(length(parameters('labId')), 36), not(contains(parameters('resourceGroupId'), '?')), not(contains(parameters('resourceGroupId'), '#')), not(contains(parameters('resourceGroupId'), '%')), not(contains(parameters('resourceGroupId'), '..')), not(contains(parameters('targetRoleScope'), '?')), not(contains(parameters('targetRoleScope'), '#')), not(contains(parameters('targetRoleScope'), '%')), not(contains(parameters('targetRoleScope'), '..')), not(contains(parameters('targetRoleAssignmentId'), '?')), not(contains(parameters('targetRoleAssignmentId'), '#')), not(contains(parameters('targetRoleAssignmentId'), '%')), not(contains(parameters('targetRoleAssignmentId'), '..')), not(contains(parameters('targetRoleDefinitionId'), '?')), not(contains(parameters('targetRoleDefinitionId'), '#')), not(contains(parameters('targetRoleDefinitionId'), '%')), not(contains(parameters('targetRoleDefinitionId'), '..')))",
+      "actions": {
+        "Validate_configuration_validated": {
+          "type": "Compose",
+          "inputs": "configuration_valid"
+        }
+      },
+      "else": {
+        "actions": {
+          "Validate_configuration_rejected": {
+            "type": "Terminate",
+            "inputs": {
+              "runStatus": "Failed",
+              "runError": {
+                "code": "ConfigurationRejected",
+                "message": "Resource identifiers do not describe the configured lab subscription and group."
+              }
+            }
+          }
+        }
+      },
+      "runAfter": {}
+    },
+    "Read_group": {
+      "type": "Http",
+      "inputs": {
+        "method": "GET",
+        "uri": "@concat('https://management.azure.com', parameters('resourceGroupId'), '?api-version=2022-09-01')",
+        "authentication": {
+          "type": "ManagedServiceIdentity",
+          "audience": "https://management.azure.com/"
+        },
+        "retryPolicy": {
+          "type": "none"
+        }
+      },
+      "runtimeConfiguration": {
+        "secureData": {
+          "properties": [
+            "inputs",
+            "outputs"
+          ]
+        }
+      },
+      "runAfter": {
+        "Validate_configuration": [
+          "Succeeded"
+        ]
+      }
+    },
+    "Verify_group_ownership": {
+      "type": "If",
+      "expression": "@and(equals(toLower(string(body('Read_group')?['id'])), toLower(parameters('resourceGroupId'))), equals(body('Read_group')?['tags']?['storm3168LabId'], parameters('labId')))",
+      "actions": {
+        "Verify_group_ownership_validated": {
+          "type": "Compose",
+          "inputs": "group_owned"
+        }
+      },
+      "else": {
+        "actions": {
+          "Verify_group_ownership_rejected": {
+            "type": "Terminate",
+            "inputs": {
+              "runStatus": "Failed",
+              "runError": {
+                "code": "WrongLabGroup",
+                "message": "The resource group ID or server-side ownership tag did not match."
+              }
+            }
+          }
+        }
+      },
+      "runAfter": {
+        "Read_group": [
+          "Succeeded"
+        ]
+      }
+    },
+    "Read_assignment": {
+      "type": "Http",
+      "inputs": {
+        "method": "GET",
+        "uri": "@concat('https://management.azure.com', parameters('targetRoleAssignmentId'), '?api-version=2022-04-01')",
+        "authentication": {
+          "type": "ManagedServiceIdentity",
+          "audience": "https://management.azure.com/"
+        },
+        "retryPolicy": {
+          "type": "none"
+        }
+      },
+      "runtimeConfiguration": {
+        "secureData": {
+          "properties": [
+            "inputs",
+            "outputs"
+          ]
+        }
+      },
+      "runAfter": {
+        "Verify_group_ownership": [
+          "Succeeded"
+        ]
+      }
+    },
+    "Verify_assignment": {
+      "type": "If",
+      "expression": "@and(equals(toLower(string(body('Read_assignment')?['id'])), toLower(parameters('targetRoleAssignmentId'))), equals(toLower(string(body('Read_assignment')?['properties']?['principalId'])), toLower(parameters('actorObjectId'))), equals(toLower(string(body('Read_assignment')?['properties']?['roleDefinitionId'])), toLower(parameters('targetRoleDefinitionId'))), equals(toLower(string(body('Read_assignment')?['properties']?['scope'])), toLower(parameters('targetRoleScope'))), equals(body('Read_assignment')?['properties']?['principalType'], 'ServicePrincipal'))",
+      "actions": {
+        "Verify_assignment_validated": {
+          "type": "Compose",
+          "inputs": "target_assignment_matches"
+        }
+      },
+      "else": {
+        "actions": {
+          "Verify_assignment_rejected": {
+            "type": "Terminate",
+            "inputs": {
+              "runStatus": "Failed",
+              "runError": {
+                "code": "WrongAssignment",
+                "message": "Principal, role, scope or resource ID did not exactly match the configured target."
+              }
+            }
+          }
+        }
+      },
+      "runAfter": {
+        "Read_assignment": [
+          "Succeeded"
+        ]
+      }
+    },
+    "Dry_run_gate": {
+      "type": "If",
+      "expression": "@equals(parameters('dryRun'), true)",
+      "actions": {
+        "Record_dry_run": {
+          "type": "Compose",
+          "inputs": {
+            "status": "dry_run_no_mutation",
+            "roleAssignmentId": "@parameters('targetRoleAssignmentId')",
+            "actorObjectId": "@parameters('actorObjectId')",
+            "checkedAt": "@utcNow()",
+            "workflowRunId": "@workflow().run.name"
+          }
+        },
+        "End_dry_run": {
+          "type": "Terminate",
+          "inputs": {
+            "runStatus": "Succeeded"
+          },
+          "runAfter": {
+            "Record_dry_run": [
+              "Succeeded"
+            ]
+          }
+        }
+      },
+      "else": {
+        "actions": {}
+      },
+      "runAfter": {
+        "Verify_assignment": [
+          "Succeeded"
+        ]
+      }
+    },
+    "Confirm_execution": {
+      "type": "If",
+      "expression": "@and(equals(parameters('dryRun'), false), equals(parameters('executionConfirmation'), 'REMOVE_CONFIGURED_LAB_ROLE'))",
+      "actions": {
+        "Confirm_execution_validated": {
+          "type": "Compose",
+          "inputs": "execution_confirmed"
+        }
+      },
+      "else": {
+        "actions": {
+          "Confirm_execution_rejected": {
+            "type": "Terminate",
+            "inputs": {
+              "runStatus": "Failed",
+              "runError": {
+                "code": "ExecutionNotConfirmed",
+                "message": "Explicit execution confirmation is absent; no deletion was attempted."
+              }
+            }
+          }
+        }
+      },
+      "runAfter": {
+        "Dry_run_gate": [
+          "Succeeded"
+        ]
+      }
+    },
+    "Read_group_again": {
+      "type": "Http",
+      "inputs": {
+        "method": "GET",
+        "uri": "@concat('https://management.azure.com', parameters('resourceGroupId'), '?api-version=2022-09-01')",
+        "authentication": {
+          "type": "ManagedServiceIdentity",
+          "audience": "https://management.azure.com/"
+        },
+        "retryPolicy": {
+          "type": "none"
+        }
+      },
+      "runtimeConfiguration": {
+        "secureData": {
+          "properties": [
+            "inputs",
+            "outputs"
+          ]
+        }
+      },
+      "runAfter": {
+        "Confirm_execution": [
+          "Succeeded"
+        ]
+      }
+    },
+    "Recheck_group_ownership": {
+      "type": "If",
+      "expression": "@and(equals(toLower(string(body('Read_group_again')?['id'])), toLower(parameters('resourceGroupId'))), equals(body('Read_group_again')?['tags']?['storm3168LabId'], parameters('labId')))",
+      "actions": {
+        "Recheck_group_ownership_validated": {
+          "type": "Compose",
+          "inputs": "group_still_owned"
+        }
+      },
+      "else": {
+        "actions": {
+          "Recheck_group_ownership_rejected": {
+            "type": "Terminate",
+            "inputs": {
+              "runStatus": "Failed",
+              "runError": {
+                "code": "OwnershipChanged",
+                "message": "The lab ownership tag changed; no deletion was attempted."
+              }
+            }
+          }
+        }
+      },
+      "runAfter": {
+        "Read_group_again": [
+          "Succeeded"
+        ]
+      }
+    },
+    "Read_assignment_again": {
+      "type": "Http",
+      "inputs": {
+        "method": "GET",
+        "uri": "@concat('https://management.azure.com', parameters('targetRoleAssignmentId'), '?api-version=2022-04-01')",
+        "authentication": {
+          "type": "ManagedServiceIdentity",
+          "audience": "https://management.azure.com/"
+        },
+        "retryPolicy": {
+          "type": "none"
+        }
+      },
+      "runtimeConfiguration": {
+        "secureData": {
+          "properties": [
+            "inputs",
+            "outputs"
+          ]
+        }
+      },
+      "runAfter": {
+        "Recheck_group_ownership": [
+          "Succeeded"
+        ]
+      }
+    },
+    "Recheck_assignment": {
+      "type": "If",
+      "expression": "@and(equals(toLower(string(body('Read_assignment_again')?['id'])), toLower(parameters('targetRoleAssignmentId'))), equals(toLower(string(body('Read_assignment_again')?['properties']?['principalId'])), toLower(parameters('actorObjectId'))), equals(toLower(string(body('Read_assignment_again')?['properties']?['roleDefinitionId'])), toLower(parameters('targetRoleDefinitionId'))), equals(toLower(string(body('Read_assignment_again')?['properties']?['scope'])), toLower(parameters('targetRoleScope'))), equals(body('Read_assignment_again')?['properties']?['principalType'], 'ServicePrincipal'))",
+      "actions": {
+        "Recheck_assignment_validated": {
+          "type": "Compose",
+          "inputs": "target_assignment_still_matches"
+        }
+      },
+      "else": {
+        "actions": {
+          "Recheck_assignment_rejected": {
+            "type": "Terminate",
+            "inputs": {
+              "runStatus": "Failed",
+              "runError": {
+                "code": "AssignmentChanged",
+                "message": "The target assignment changed; no deletion was attempted."
+              }
+            }
+          }
+        }
+      },
+      "runAfter": {
+        "Read_assignment_again": [
+          "Succeeded"
+        ]
+      }
+    },
+    "Delete_configured_assignment": {
+      "type": "Http",
+      "inputs": {
+        "method": "DELETE",
+        "uri": "@concat('https://management.azure.com', parameters('targetRoleAssignmentId'), '?api-version=2022-04-01')",
+        "authentication": {
+          "type": "ManagedServiceIdentity",
+          "audience": "https://management.azure.com/"
+        },
+        "retryPolicy": {
+          "type": "none"
+        }
+      },
+      "runtimeConfiguration": {
+        "secureData": {
+          "properties": [
+            "inputs",
+            "outputs"
+          ]
+        }
+      },
+      "runAfter": {
+        "Recheck_assignment": [
+          "Succeeded"
+        ]
+      }
+    },
+    "Read_after_delete": {
+      "type": "Http",
+      "inputs": {
+        "method": "GET",
+        "uri": "@concat('https://management.azure.com', parameters('targetRoleAssignmentId'), '?api-version=2022-04-01')",
+        "authentication": {
+          "type": "ManagedServiceIdentity",
+          "audience": "https://management.azure.com/"
+        },
+        "retryPolicy": {
+          "type": "none"
+        }
+      },
+      "runtimeConfiguration": {
+        "secureData": {
+          "properties": [
+            "inputs",
+            "outputs"
+          ]
+        }
+      },
+      "runAfter": {
+        "Delete_configured_assignment": [
+          "Succeeded"
+        ]
+      }
+    },
+    "Confirm_assignment_absent": {
+      "type": "If",
+      "expression": "@equals(outputs('Read_after_delete')?['statusCode'], 404)",
+      "actions": {
+        "Record_result": {
+          "type": "Compose",
+          "inputs": {
+            "status": "role_assignment_removed_access_unverified",
+            "roleAssignmentId": "@parameters('targetRoleAssignmentId')",
+            "actorObjectId": "@parameters('actorObjectId')",
+            "checkedAt": "@utcNow()",
+            "workflowRunId": "@workflow().run.name",
+            "nextStep": "Run the independent fixed-token probe. This does not prove resource access is denied."
+          }
+        }
+      },
+      "else": {
+        "actions": {
+          "Confirm_assignment_absent_rejected": {
+            "type": "Terminate",
+            "inputs": {
+              "runStatus": "Failed",
+              "runError": {
+                "code": "AbsenceNotVerified",
+                "message": "The exact assignment did not return HTTP 404. Do not mark containment successful."
+              }
+            }
+          }
+        }
+      },
+      "runAfter": {
+        "Read_after_delete": [
+          "Succeeded",
+          "Failed",
+          "TimedOut"
+        ]
+      }
+    }
+  },
+  "outputs": {}
+}

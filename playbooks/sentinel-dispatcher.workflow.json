@@ -1,0 +1,576 @@
+{
+  "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+  "contentVersion": "1.0.0.0",
+  "parameters": {
+    "expectedSubscriptionId": {
+      "type": "String"
+    },
+    "labId": {
+      "type": "String"
+    },
+    "resourceGroupId": {
+      "type": "String"
+    },
+    "workspaceResourceId": {
+      "type": "String"
+    },
+    "analyticRuleResourceId": {
+      "type": "String"
+    },
+    "actorObjectId": {
+      "type": "String"
+    },
+    "executorResourceId": {
+      "type": "String"
+    },
+    "targetRoleAssignmentId": {
+      "type": "String"
+    },
+    "targetRoleDefinitionId": {
+      "type": "String"
+    },
+    "targetRoleScope": {
+      "type": "String"
+    },
+    "dispatchEnabled": {
+      "type": "Bool",
+      "defaultValue": false
+    },
+    "expectedExecutorDryRun": {
+      "type": "Bool",
+      "defaultValue": true
+    },
+    "dispatchConfirmation": {
+      "type": "String",
+      "defaultValue": ""
+    },
+    "$connections": {
+      "type": "Object",
+      "defaultValue": {}
+    }
+  },
+  "triggers": {
+    "Microsoft_Sentinel_incident": {
+      "type": "ApiConnectionWebhook",
+      "inputs": {
+        "host": {
+          "connection": {
+            "name": "@parameters('$connections')['azuresentinel']['connectionId']"
+          }
+        },
+        "path": "/incident-creation",
+        "body": {
+          "callback_url": "@{listCallbackUrl()}"
+        }
+      },
+      "runtimeConfiguration": {
+        "concurrency": {
+          "runs": 1
+        },
+        "secureData": {
+          "properties": [
+            "inputs",
+            "outputs"
+          ]
+        }
+      }
+    }
+  },
+  "actions": {
+    "Validate_dispatch_configuration": {
+      "type": "If",
+      "expression": "@and(equals(toLower(split(workflow().id, '/')[2]), toLower(parameters('expectedSubscriptionId'))), equals(toLower(parameters('resourceGroupId')), toLower(concat('/subscriptions/', parameters('expectedSubscriptionId'), '/resourceGroups/', split(workflow().id, '/')[4]))), equals(toLower(parameters('workspaceResourceId')), toLower(concat(parameters('resourceGroupId'), '/providers/Microsoft.OperationalInsights/workspaces/', last(split(parameters('workspaceResourceId'), '/'))))), equals(toLower(parameters('analyticRuleResourceId')), toLower(concat(parameters('workspaceResourceId'), '/providers/Microsoft.SecurityInsights/alertRules/', last(split(parameters('analyticRuleResourceId'), '/'))))), equals(toLower(parameters('executorResourceId')), toLower(concat(parameters('resourceGroupId'), '/providers/Microsoft.Logic/workflows/', last(split(parameters('executorResourceId'), '/'))))), not(contains(parameters('resourceGroupId'), '?')), not(contains(parameters('resourceGroupId'), '#')), not(contains(parameters('resourceGroupId'), '%')), not(contains(parameters('resourceGroupId'), '..')), not(contains(parameters('workspaceResourceId'), '?')), not(contains(parameters('workspaceResourceId'), '#')), not(contains(parameters('workspaceResourceId'), '%')), not(contains(parameters('workspaceResourceId'), '..')), not(contains(parameters('analyticRuleResourceId'), '?')), not(contains(parameters('analyticRuleResourceId'), '#')), not(contains(parameters('analyticRuleResourceId'), '%')), not(contains(parameters('analyticRuleResourceId'), '..')), not(contains(parameters('executorResourceId'), '?')), not(contains(parameters('executorResourceId'), '#')), not(contains(parameters('executorResourceId'), '%')), not(contains(parameters('executorResourceId'), '..')))",
+      "actions": {
+        "Validate_dispatch_configuration_ok": {
+          "type": "Compose",
+          "inputs": "validated"
+        }
+      },
+      "else": {
+        "actions": {
+          "Validate_dispatch_configuration_reject": {
+            "type": "Terminate",
+            "inputs": {
+              "runStatus": "Failed",
+              "runError": {
+                "code": "LabDispatchRejected",
+                "message": "Validate_dispatch_configuration: evidence or configured scope did not match; executor was not invoked."
+              }
+            }
+          }
+        }
+      },
+      "runAfter": {}
+    },
+    "Validate_incident_address": {
+      "type": "If",
+      "expression": "@and(equals(toLower(string(triggerBody()?['object']?['id'])), toLower(concat(parameters('workspaceResourceId'), '/providers/Microsoft.SecurityInsights/incidents/', last(split(string(triggerBody()?['object']?['id']), '/'))))), equals(length(last(split(string(triggerBody()?['object']?['id']), '/'))), 36), not(contains(string(triggerBody()?['object']?['id']), '?')), not(contains(string(triggerBody()?['object']?['id']), '#')), not(contains(string(triggerBody()?['object']?['id']), '%')), not(contains(string(triggerBody()?['object']?['id']), '..')))",
+      "actions": {
+        "Validate_incident_address_ok": {
+          "type": "Compose",
+          "inputs": "validated"
+        }
+      },
+      "else": {
+        "actions": {
+          "Validate_incident_address_reject": {
+            "type": "Terminate",
+            "inputs": {
+              "runStatus": "Failed",
+              "runError": {
+                "code": "LabDispatchRejected",
+                "message": "Validate_incident_address: evidence or configured scope did not match; executor was not invoked."
+              }
+            }
+          }
+        }
+      },
+      "runAfter": {
+        "Validate_dispatch_configuration": [
+          "Succeeded"
+        ]
+      }
+    },
+    "Read_lab_group": {
+      "type": "Http",
+      "inputs": {
+        "method": "GET",
+        "uri": "@concat('https://management.azure.com', parameters('resourceGroupId'), '?api-version=2022-09-01')",
+        "authentication": {
+          "type": "ManagedServiceIdentity",
+          "audience": "https://management.azure.com/"
+        },
+        "retryPolicy": {
+          "type": "none"
+        }
+      },
+      "runtimeConfiguration": {
+        "secureData": {
+          "properties": [
+            "inputs",
+            "outputs"
+          ]
+        }
+      },
+      "runAfter": {
+        "Validate_incident_address": [
+          "Succeeded"
+        ]
+      }
+    },
+    "Check_lab_ownership": {
+      "type": "If",
+      "expression": "@and(equals(toLower(string(body('Read_lab_group')?['id'])), toLower(parameters('resourceGroupId'))), equals(body('Read_lab_group')?['tags']?['storm3168LabId'], parameters('labId')))",
+      "actions": {
+        "Check_lab_ownership_ok": {
+          "type": "Compose",
+          "inputs": "validated"
+        }
+      },
+      "else": {
+        "actions": {
+          "Check_lab_ownership_reject": {
+            "type": "Terminate",
+            "inputs": {
+              "runStatus": "Failed",
+              "runError": {
+                "code": "LabDispatchRejected",
+                "message": "Check_lab_ownership: evidence or configured scope did not match; executor was not invoked."
+              }
+            }
+          }
+        }
+      },
+      "runAfter": {
+        "Read_lab_group": [
+          "Succeeded"
+        ]
+      }
+    },
+    "Read_incident": {
+      "type": "Http",
+      "inputs": {
+        "method": "GET",
+        "uri": "@concat('https://management.azure.com', triggerBody()?['object']?['id'], '?api-version=2025-09-01')",
+        "authentication": {
+          "type": "ManagedServiceIdentity",
+          "audience": "https://management.azure.com/"
+        },
+        "retryPolicy": {
+          "type": "none"
+        }
+      },
+      "runtimeConfiguration": {
+        "secureData": {
+          "properties": [
+            "inputs",
+            "outputs"
+          ]
+        }
+      },
+      "runAfter": {
+        "Check_lab_ownership": [
+          "Succeeded"
+        ]
+      }
+    },
+    "Check_incident_rule": {
+      "type": "If",
+      "expression": "@and(equals(toLower(string(body('Read_incident')?['id'])), toLower(string(triggerBody()?['object']?['id']))), equals(length(coalesce(body('Read_incident')?['properties']?['relatedAnalyticRuleIds'], json('[]'))), 1), equals(toLower(string(first(coalesce(body('Read_incident')?['properties']?['relatedAnalyticRuleIds'], json('[\"\"]'))))), toLower(parameters('analyticRuleResourceId'))), or(equals(body('Read_incident')?['properties']?['status'], 'New'), equals(body('Read_incident')?['properties']?['status'], 'Active')))",
+      "actions": {
+        "Check_incident_rule_ok": {
+          "type": "Compose",
+          "inputs": "validated"
+        }
+      },
+      "else": {
+        "actions": {
+          "Check_incident_rule_reject": {
+            "type": "Terminate",
+            "inputs": {
+              "runStatus": "Failed",
+              "runError": {
+                "code": "LabDispatchRejected",
+                "message": "Check_incident_rule: evidence or configured scope did not match; executor was not invoked."
+              }
+            }
+          }
+        }
+      },
+      "runAfter": {
+        "Read_incident": [
+          "Succeeded"
+        ]
+      }
+    },
+    "Read_incident_alerts": {
+      "type": "Http",
+      "inputs": {
+        "method": "POST",
+        "uri": "@concat('https://management.azure.com', triggerBody()?['object']?['id'], '/alerts?api-version=2025-09-01')",
+        "authentication": {
+          "type": "ManagedServiceIdentity",
+          "audience": "https://management.azure.com/"
+        },
+        "retryPolicy": {
+          "type": "none"
+        }
+      },
+      "runtimeConfiguration": {
+        "secureData": {
+          "properties": [
+            "inputs",
+            "outputs"
+          ]
+        }
+      },
+      "runAfter": {
+        "Check_incident_rule": [
+          "Succeeded"
+        ]
+      }
+    },
+    "Check_single_alert": {
+      "type": "If",
+      "expression": "@and(equals(length(coalesce(body('Read_incident_alerts')?['value'], json('[]'))), 1), empty(body('Read_incident_alerts')?['nextLink']))",
+      "actions": {
+        "Check_single_alert_ok": {
+          "type": "Compose",
+          "inputs": "validated"
+        }
+      },
+      "else": {
+        "actions": {
+          "Check_single_alert_reject": {
+            "type": "Terminate",
+            "inputs": {
+              "runStatus": "Failed",
+              "runError": {
+                "code": "LabDispatchRejected",
+                "message": "Check_single_alert: evidence or configured scope did not match; executor was not invoked."
+              }
+            }
+          }
+        }
+      },
+      "runAfter": {
+        "Read_incident_alerts": [
+          "Succeeded"
+        ]
+      }
+    },
+    "Check_alert_origin": {
+      "type": "If",
+      "expression": "@and(equals(first(body('Read_incident_alerts')?['value'])?['kind'], 'SecurityAlert'), equals(toLower(string(first(body('Read_incident_alerts')?['value'])?['properties']?['alertType'])), toLower(last(split(parameters('analyticRuleResourceId'), '/')))))",
+      "actions": {
+        "Check_alert_origin_ok": {
+          "type": "Compose",
+          "inputs": "validated"
+        }
+      },
+      "else": {
+        "actions": {
+          "Check_alert_origin_reject": {
+            "type": "Terminate",
+            "inputs": {
+              "runStatus": "Failed",
+              "runError": {
+                "code": "LabDispatchRejected",
+                "message": "Check_alert_origin: evidence or configured scope did not match; executor was not invoked."
+              }
+            }
+          }
+        }
+      },
+      "runAfter": {
+        "Check_single_alert": [
+          "Succeeded"
+        ]
+      }
+    },
+    "Parse_custom_details": {
+      "type": "ParseJson",
+      "inputs": {
+        "content": "@first(body('Read_incident_alerts')?['value'])?['properties']?['additionalData']?['Custom Details']",
+        "schema": {
+          "type": "object",
+          "required": [
+            "ActorObjectId",
+            "LabId",
+            "ResourceId",
+            "ProviderEventId"
+          ],
+          "properties": {
+            "ActorObjectId": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 1,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "LabId": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 1,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "ResourceId": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 1,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "ProviderEventId": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 1,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      },
+      "runtimeConfiguration": {
+        "secureData": {
+          "properties": [
+            "inputs",
+            "outputs"
+          ]
+        }
+      },
+      "runAfter": {
+        "Check_alert_origin": [
+          "Succeeded"
+        ]
+      }
+    },
+    "Check_evidence_scope": {
+      "type": "If",
+      "expression": "@and(equals(toLower(first(body('Parse_custom_details')?['ActorObjectId'])), toLower(parameters('actorObjectId'))), equals(first(body('Parse_custom_details')?['LabId']), parameters('labId')), or(equals(toLower(first(body('Parse_custom_details')?['ResourceId'])), toLower(parameters('resourceGroupId'))), startsWith(toLower(first(body('Parse_custom_details')?['ResourceId'])), concat(toLower(parameters('resourceGroupId')), '/providers/'))), not(contains(first(body('Parse_custom_details')?['ResourceId']), '?')), not(contains(first(body('Parse_custom_details')?['ResourceId']), '#')), not(contains(first(body('Parse_custom_details')?['ResourceId']), '%')), not(contains(first(body('Parse_custom_details')?['ResourceId']), '..')))",
+      "actions": {
+        "Check_evidence_scope_ok": {
+          "type": "Compose",
+          "inputs": "validated"
+        }
+      },
+      "else": {
+        "actions": {
+          "Check_evidence_scope_reject": {
+            "type": "Terminate",
+            "inputs": {
+              "runStatus": "Failed",
+              "runError": {
+                "code": "LabDispatchRejected",
+                "message": "Check_evidence_scope: evidence or configured scope did not match; executor was not invoked."
+              }
+            }
+          }
+        }
+      },
+      "runAfter": {
+        "Parse_custom_details": [
+          "Succeeded"
+        ]
+      }
+    },
+    "Read_executor": {
+      "type": "Http",
+      "inputs": {
+        "method": "GET",
+        "uri": "@concat('https://management.azure.com', parameters('executorResourceId'), '?api-version=2019-05-01')",
+        "authentication": {
+          "type": "ManagedServiceIdentity",
+          "audience": "https://management.azure.com/"
+        },
+        "retryPolicy": {
+          "type": "none"
+        }
+      },
+      "runtimeConfiguration": {
+        "secureData": {
+          "properties": [
+            "inputs",
+            "outputs"
+          ]
+        }
+      },
+      "runAfter": {
+        "Check_evidence_scope": [
+          "Succeeded"
+        ]
+      }
+    },
+    "Check_executor": {
+      "type": "If",
+      "expression": "@and(equals(toLower(string(body('Read_executor')?['id'])), toLower(parameters('executorResourceId'))), equals(body('Read_executor')?['tags']?['storm3168LabId'], parameters('labId')), equals(body('Read_executor')?['properties']?['parameters']?['labId']?['value'], parameters('labId')), equals(toLower(string(body('Read_executor')?['properties']?['parameters']?['actorObjectId']?['value'])), toLower(parameters('actorObjectId'))), equals(toLower(string(body('Read_executor')?['properties']?['parameters']?['resourceGroupId']?['value'])), toLower(parameters('resourceGroupId'))), equals(toLower(string(body('Read_executor')?['properties']?['parameters']?['targetRoleAssignmentId']?['value'])), toLower(parameters('targetRoleAssignmentId'))), equals(toLower(string(body('Read_executor')?['properties']?['parameters']?['targetRoleDefinitionId']?['value'])), toLower(parameters('targetRoleDefinitionId'))), equals(toLower(string(body('Read_executor')?['properties']?['parameters']?['targetRoleScope']?['value'])), toLower(parameters('targetRoleScope'))), equals(body('Read_executor')?['properties']?['parameters']?['dryRun']?['value'], parameters('expectedExecutorDryRun')))",
+      "actions": {
+        "Check_executor_ok": {
+          "type": "Compose",
+          "inputs": "validated"
+        }
+      },
+      "else": {
+        "actions": {
+          "Check_executor_reject": {
+            "type": "Terminate",
+            "inputs": {
+              "runStatus": "Failed",
+              "runError": {
+                "code": "LabDispatchRejected",
+                "message": "Check_executor: evidence or configured scope did not match; executor was not invoked."
+              }
+            }
+          }
+        }
+      },
+      "runAfter": {
+        "Read_executor": [
+          "Succeeded"
+        ]
+      }
+    },
+    "Dispatch_gate": {
+      "type": "If",
+      "expression": "@equals(parameters('dispatchEnabled'), true)",
+      "actions": {
+        "Check_dispatch_confirmation": {
+          "type": "If",
+          "expression": "@and(equals(parameters('dispatchConfirmation'), 'INVOKE_CONFIGURED_LAB_EXECUTOR'), equals(body('Read_executor')?['properties']?['state'], 'Enabled'))",
+          "actions": {
+            "Check_dispatch_confirmation_ok": {
+              "type": "Compose",
+              "inputs": "validated"
+            }
+          },
+          "else": {
+            "actions": {
+              "Check_dispatch_confirmation_reject": {
+                "type": "Terminate",
+                "inputs": {
+                  "runStatus": "Failed",
+                  "runError": {
+                    "code": "LabDispatchRejected",
+                    "message": "Check_dispatch_confirmation: evidence or configured scope did not match; executor was not invoked."
+                  }
+                }
+              }
+            }
+          },
+          "runAfter": {}
+        },
+        "Invoke_executor": {
+          "type": "Http",
+          "inputs": {
+            "method": "POST",
+            "uri": "@concat('https://management.azure.com', parameters('executorResourceId'), '/triggers/manual/run?api-version=2016-06-01')",
+            "authentication": {
+              "type": "ManagedServiceIdentity",
+              "audience": "https://management.azure.com/"
+            },
+            "retryPolicy": {
+              "type": "none"
+            }
+          },
+          "runtimeConfiguration": {
+            "secureData": {
+              "properties": [
+                "inputs",
+                "outputs"
+              ]
+            }
+          },
+          "runAfter": {
+            "Check_dispatch_confirmation": [
+              "Succeeded"
+            ]
+          },
+          "operationOptions": "DisableAsyncPattern"
+        },
+        "Record_dispatch": {
+          "type": "Compose",
+          "inputs": {
+            "status": "executor_invocation_requested_outcome_unverified",
+            "incidentId": "@triggerBody()?['object']?['id']",
+            "executorResourceId": "@parameters('executorResourceId')",
+            "requestedAt": "@utcNow()",
+            "dispatcherRunId": "@workflow().run.name",
+            "nextStep": "Inspect the executor run, then perform independent fixed-token capability verification."
+          },
+          "runAfter": {
+            "Invoke_executor": [
+              "Succeeded"
+            ]
+          }
+        }
+      },
+      "else": {
+        "actions": {
+          "Record_preview": {
+            "type": "Compose",
+            "inputs": {
+              "status": "dispatch_preview_no_invocation",
+              "incidentId": "@triggerBody()?['object']?['id']",
+              "checkedAt": "@utcNow()"
+            }
+          }
+        }
+      },
+      "runAfter": {
+        "Check_executor": [
+          "Succeeded"
+        ]
+      }
+    }
+  },
+  "outputs": {}
+}

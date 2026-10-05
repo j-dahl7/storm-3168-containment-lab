@@ -1,0 +1,21 @@
+{
+  "synthetic": true,
+  "reference_utc": "2026-10-01T12:00:00Z",
+  "not_live_azure_evidence": true,
+  "query": "detections/04-sensitive-operations.kql",
+  "expected_unique_event_ids": [
+    "synthetic-event-001",
+    "synthetic-event-005",
+    "synthetic-event-007",
+    "synthetic-event-008",
+    "synthetic-event-010",
+    "synthetic-event-014"
+  ],
+  "notes": [
+    "SyntheticIngestedAt exists only in this fixture and replay; it is not a provider schema field.",
+    "Original scheduled query uses ingestion_time(); replay substitutes SyntheticIngestedAt.",
+    "No fixture row is to be uploaded into AzureActivity or AADServicePrincipalSignInLogs.",
+    "ExpectedMatch is the expected predicate result before event-ID deduplication; not a measured provider response."
+  ]
+}
+

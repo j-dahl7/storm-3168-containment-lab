@@ -1,0 +1,15 @@
+// Authentication evidence only; not the outcome of every resource request.
+// No UserId field is assumed. ServicePrincipalId != AppId.
+// Select ResultType/ResultSignature as recorded; inspect representation in your tenant.
+let ActorObjectId = "22222222-2222-4222-8222-222222222222";
+let LabTenantId = "33333333-3333-4333-8333-333333333333";
+AADServicePrincipalSignInLogs
+| where TimeGenerated > ago(24h)
+| where ServicePrincipalId =~ ActorObjectId and AADTenantId =~ LabTenantId
+| extend WorkspaceIngestionTime = ingestion_time()
+| project TimeGenerated, CreatedDateTime, WorkspaceIngestionTime,
+    ServicePrincipalId, AppId, IPAddress, ResourceDisplayName, ResourceIdentity,
+    ClientCredentialType, ResultType, ResultSignature, ResultDescription,
+    ConditionalAccessStatus, CorrelationId, Id
+| order by CreatedDateTime asc
+
