@@ -72,6 +72,12 @@ python scripts/live_trial.py --manifest private/manifest.json --subscription SUB
 
 Then run one selected action, for example `sp-disable` or `role-delete` with the exact writer assignment ID from the private manifest. The selected action remains applied; the wrapper removes only its temporary credential, not the response action. Restore and verify the baseline before a new trial. Never supply a token/secret/key as a command-line argument.
 
+Use `--check-new-token` only when the separate issuance control is part of the
+trial. Its returned token is discarded and never replaces the frozen probe.
+Initial credential propagation retries occur before the probe token is acquired;
+the private receipt records those attempts. Baseline collection requires at
+least two allowed observations before applying a response.
+
 For a manually prepared credential, `python -m stormlab probe --help` documents environment-variable names for bearer, Shared Key and SAS inputs. SAS input is only a read-only, HTTPS query string with explicit expiry; the target URL always comes from the manifest's exact canary blob. The harness never refreshes that credential or follows redirects.
 
 Tag probes preserve existing tags, use the Storage account API and check the resulting nonce. Serialize tag writers: this is not an atomic concurrent update protocol. The API may reject a write, accept it without verified completion, or fail before writing; those are distinct outcomes.
