@@ -54,3 +54,9 @@ Retained storage/workspace costs and standing lab permissions require deliberate
 review. Cleanup is manifest-driven and never deletes the whole resource group.
 The public post must remain draft until measured results and source provenance
 are accepted.
+
+The initial retained review deployment has its canary service principal disabled
+and its responder disabled with dry-run defaults restored. Before a new trial,
+explicitly prepare the intended access path using `configure_access.py` and its
+`--enable-actor` option, then establish a fresh baseline. This is not permission
+to change another tenant or an unrecorded application.
