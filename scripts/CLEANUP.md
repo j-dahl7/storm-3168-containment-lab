@@ -24,17 +24,19 @@ Before the first write, the helper checks the resource group's exact ID and `sto
 
 The execution order is:
 
+0. If private/activity-export-state.json exists, validate and remove only its exact recorded subscription diagnostic-setting ID. This checks the live lab resource group and the setting's exact destination/category but does not require the destination workspace to still exist. Absence must be verified before continuing. Other subscription exports are never enumerated or modified.
+
 1. Disable the recorded responder workflow, verify its state, and verify no nonterminal runs remain. Disabling a workflow does not cancel an existing run; cleanup refuses to delete while one remains. A paginated or ambiguous run response also stops cleanup for review.
 2. Delete and verify absence of only the role assignments recorded in the manifest and responder state, then the recorded custom responder role. Built-in role definitions are never deleted. If another unrecorded assignment still uses the custom role, a provider refusal must be reconciled; the helper will not find and delete that assignment.
 3. Delete the recorded responder workflow. Azure manages its system-assigned identity's lifecycle; cleanup does not issue a separate Graph delete for that identity.
 4. Delete the recorded actor SP, application, and security group, with grants checked absent again before identity deletion.
 5. Delete storage and/or the workspace **only if separately included and acknowledged**.
 
-There is no resource-group delete, purge, bulk resource enumeration, lock delete, callback URL, token output, automatic permission grant, or mutation retry. Serialize cleanup with all other lab operations; Azure does not provide an atomic transaction spanning ownership checks and multiple services.
+There is no resource-group delete, purge, bulk resource deletion, lock delete, callback URL, token output, automatic permission grant, or mutation retry. Execution refuses an active/incomplete local trial lease. Serialize other checkouts and direct cloud clients too; Azure does not provide an atomic transaction spanning ownership checks and multiple services.
 
 ## Locks and partial runs
 
-An object at the exact manifest lab-lock ID stops cleanup before mutation. Review it and use the existing separately gated harness action only if it is the lab-owned lock:
+Before mutation, cleanup reads both resource-group and storage-account lock collections as well as the exact manifest lab-lock ID. Any lock or unverified collection stops the operation; cleanup never removes a discovered lock. Review it and use the existing separately gated harness action only if it is the lab-owned lock:
 
 ```powershell
 python -m stormlab respond --manifest private/manifest.json `
@@ -55,7 +57,9 @@ This helper does not prove fixed-token revocation or revoke every credential. Cl
 
 By default the lab resource group, storage account, and Log Analytics workspace remain. Resource groups themselves are not a usage meter, but retained storage data, transactions, Log Analytics ingestion/retention, enabled Sentinel services and connected telemetry can still generate charges. The workspace ingestion quota and the lab's under-$10 target are not an enforced spending cap. Check Cost Management and any connector or diagnostic settings left feeding the workspace. A successful default cleanup reports `completed_with_retained_resources`; this is not a zero-cost guarantee.
 
-Optional Sentinel dispatcher workflows, API connections, analytics/automation rules, diagnostic settings and any other objects absent from the main manifest/responder state are **not managed by this helper**. It does not discover or disable them. Keep their separate deployment records and reconcile them explicitly; a caller who deployed those optional components must disable their automation before starting this cleanup. Likewise, cloud deployment-history records remain. Do not delete the resource group as a shortcut.
+Optional Sentinel dispatcher workflows, API connections, analytics/automation rules and other unrecorded diagnostic settings are **not removed by this helper**. The sole diagnostic exception is the exact separate activity-export-state.json receipt described above. Keep separate deployment records and reconcile them explicitly; a caller who deployed optional automation must disable it before cleanup. Likewise, cloud deployment-history records remain. Do not delete the resource group as a shortcut.
+
+After removals, a read-only leftovers report lists unrecorded resources in the lab group, unrecorded assignments to the selected lab identities at the queried RG scope, and the exact application's/SP's soft-deleted state. Discovery never adds deletion targets or purges deleted identities. Failed/paginated inventory is reported as incomplete, not clean. This bounded inventory does not establish a tenant-wide absence of grants or hidden dependent resources.
 
 For data cleanup, archive the raw private trial evidence and any needed canary or workspace data first. The script cannot verify that archival is complete. `--acknowledge-data-loss` means the operator either completed that archival or intentionally accepts the loss; it is an acknowledgment, not a backup validation.
 

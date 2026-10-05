@@ -41,7 +41,8 @@ class ShutdownProof:
 
     Never load this from disk. It grants no enable, cancellation, configuration,
     deployment or RBAC action. A readable identity mismatch revokes this proof;
-    unavailable metadata does not prevent the one bounded DISABLE attempt.
+    unavailable metadata does not prevent bounded idempotent DISABLE retries.
+    expires_at blocks activation, never the same-invocation safety stop.
     """
     workflow_id: str
     lab_id: str
@@ -73,45 +74,66 @@ def read_shutdown_identity(proof: ShutdownProof, http: HTTP, operator: AzureCLI)
 
 
 def independent_shutdown(proof: ShutdownProof, state: dict, http: HTTP, operator: AzureCLI,
-                         *, timeout: float = 60) -> None:
-    """Least-authority stop, independent of metadata availability and disk I/O.
+                         *, timeout: float = 60, before_write=None) -> None:
+    """Bounded idempotent stop retries for one pinned workflow, never a DELETE.
 
-    A live target's changed execution parameters cannot block its shutdown; only
-    the previously verified ID, tag and managed-identity tuple authorizes DISABLE.
-    A successful mismatch aborts; an unavailable leaf read still allows one exact
-    DISABLE while the in-memory proof is valid. Unknown outcomes remain unknown.
+    The proof's expiry prevents new activation, not shutdown in this invocation.
+    Successful identity drift refuses every subsequent write. An unavailable read
+    or TimeoutExpired cannot skip the bounded stop attempt or state accounting.
+    ``before_write`` is used by explicit cross-invocation reconciliation: it
+    requires fresh normal ownership before every write, with no emergency bypass.
     """
+    if not math.isfinite(timeout) or not 0 <= timeout <= 120:
+        raise RuntimeError("Shutdown timeout must be bounded to 0..120 seconds")
     state.update(disable_acknowledged=False, disabled_verified=False)
-    state["shutdown"] = {"attempted_at": stamp(), "authority": "same_invocation_verified_workflow",
-                         "target_identity_verified": False, "outcome": "unknown"}
-    if time.monotonic() >= proof.expires_at:
-        raise RuntimeError("Same-invocation shutdown proof expired; explicit reconciliation required")
-    try:
-        read_shutdown_identity(proof, http, operator)
-        state["shutdown"]["target_identity_verified"] = True
-    except (ShutdownIdentityUnavailable, SafetyError):
-        state["shutdown"]["metadata_read"] = "unavailable_using_captured_proof"
-    # The read may have consumed the remaining bound. Never extend authority by
-    # refreshing proof from an Enabled resource or loading a previous receipt.
-    if time.monotonic() >= proof.expires_at:
-        raise RuntimeError("Same-invocation shutdown proof expired before stop attempt")
-    disabled = call(http, operator, "POST", proof.workflow_id + "/disable?api-version=2016-06-01")
-    state["disable_acknowledged"] = disabled.status in {200, 202, 204} and not disabled.transport_error
-    # Even a lost POST response can be followed by a positive GET observation;
-    # preserve the separate acknowledgment and state-verification facts.
+    state["shutdown"] = {"attempted_at": stamp(), "authority": "fresh_reconciliation" if before_write else "same_invocation_verified_workflow",
+                         "target_identity_verified": False, "outcome": "unknown", "attempts": [],
+                         "activation_proof_expired": time.monotonic() >= proof.expires_at}
     deadline = time.monotonic() + timeout
-    while True:
+    for number in range(1, 9):
+        attempt = {"number": number, "observed_at": stamp()}
+        state["shutdown"]["attempts"].append(attempt)
+        try:
+            read_shutdown_identity(proof, http, operator)
+            state["shutdown"]["target_identity_verified"] = True
+        except ShutdownIdentityMismatch:
+            state["shutdown"]["outcome"] = "ownership_drift_refused"
+            raise
+        except Exception as exc:
+            attempt["metadata_read"] = "unavailable_using_captured_proof"
+            attempt["metadata_exception_type"] = type(exc).__name__
+            state["shutdown"]["metadata_read"] = "unavailable_using_captured_proof"
+        retryable = True
+        try:
+            if before_write:
+                before_write()
+            disabled = call(http, operator, "POST", proof.workflow_id + "/disable?api-version=2016-06-01")
+            attempt["post_status"] = disabled.status
+            acknowledged = disabled.status in {200, 202, 204} and not disabled.transport_error
+            state["disable_acknowledged"] = state["disable_acknowledged"] or acknowledged
+            retryable = acknowledged or disabled.transport_error or disabled.status in {0, 408, 429, 500, 502, 503, 504}
+        except ShutdownIdentityMismatch:
+            state["shutdown"]["outcome"] = "ownership_drift_refused"
+            raise
+        except Exception as exc:
+            # Includes subprocess.TimeoutExpired; no exception message, command,
+            # token or provider payload is put in the receipt.
+            attempt["post_exception_type"] = type(exc).__name__
         try:
             item = read_shutdown_identity(proof, http, operator)
             if item.get("properties", {}).get("state") == "Disabled":
                 state["disabled_verified"] = True
                 state["shutdown"].update(outcome="disabled_verified", observed_at=stamp())
                 return
-        except (ShutdownIdentityUnavailable, SafetyError):
-            pass
-        if time.monotonic() >= deadline:
-            raise RuntimeError("Independent workflow shutdown is unverified")
-        time.sleep(min(3, max(0, deadline - time.monotonic())))
+        except ShutdownIdentityMismatch:
+            state["shutdown"]["outcome"] = "ownership_drift_refused"
+            raise
+        except Exception as exc:
+            attempt["readback_exception_type"] = type(exc).__name__
+        if not retryable or number == 8 or time.monotonic() >= deadline:
+            break
+        time.sleep(min(2 ** (number - 1), 15, max(0, deadline - time.monotonic())))
+    raise RuntimeError("Independent workflow shutdown is unverified after bounded retries")
 
 
 def stamp() -> str:
@@ -129,7 +151,8 @@ def call(http: HTTP, operator: AzureCLI, method: str, path: str, body: dict | No
 
 
 def check_workflow(m: dict, state: dict, http: HTTP, operator: AzureCLI, *,
-                   dry_run: bool | None = None, expected_state: str | None = None) -> dict:
+                   dry_run: bool | None = None, expected_state: str | None = None,
+                   require_trigger_restrictions: bool = True) -> dict:
     response = call(http, operator, "GET", state["workflow_id"] + "?api-version=2019-05-01")
     if response.status != 200 or response.transport_error:
         raise RuntimeError("Owned workflow cannot be read")
@@ -152,7 +175,8 @@ def check_workflow(m: dict, state: dict, http: HTTP, operator: AzureCLI, *,
         if str(p.get(key, {}).get("value", "")).lower() != expected.lower():
             raise RuntimeError("Workflow configured target drift")
     controls = item.get("properties", {}).get("accessControl", {}).get("triggers", {})
-    if controls.get("sasAuthenticationPolicy", {}).get("state") != "Disabled" or controls.get("allowedCallerIpAddresses") != []:
+    if require_trigger_restrictions and (controls.get("sasAuthenticationPolicy", {}).get("state") != "Disabled"
+            or controls.get("allowedCallerIpAddresses") != [{"addressRange": "0.0.0.0-0.0.0.0"}]):
         raise RuntimeError("Workflow trigger restrictions are not verified")
     if dry_run is not None:
         if p.get("dryRun", {}).get("value") is not dry_run or p.get("executionConfirmation", {}).get("value") != ("" if dry_run else CONFIRMATION):
@@ -237,6 +261,9 @@ def read_runs(state: dict, http: HTTP, operator: AzureCLI) -> dict[str, str]:
 
 def remember_run(state: dict, state_path, name: str, status: str) -> None:
     state["last_run"].update(name=name, status=status, observed_at=stamp())
+    known = state.setdefault("recorded_run_names", [])
+    if name not in known:
+        known.append(name)
     save(state_path, state)  # Persist identity immediately, before any further I/O.
 
 
@@ -253,6 +280,36 @@ def discover_run(state: dict, state_path, before: set[str], http: HTTP, operator
         remember_run(state, state_path, name, runs[name])
         return name
     return None
+
+
+def executor_outcome(state: dict, http: HTTP, operator: AzureCLI) -> str:
+    """Read action statuses only; never follow/output run-history SAS links."""
+    name = state.get("last_run", {}).get("name")
+    if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,160}", name):
+        return "outcome_unverified"
+    prefix = state["workflow_id"] + "/runs/" + name + "/actions/"
+    response = call(http, operator, "GET", prefix[:-1] + "?api-version=2016-06-01")
+    if response.status != 200 or response.transport_error:
+        return "outcome_unverified"
+    data = response.data()
+    if data.get("nextLink") or not isinstance(data.get("value"), list):
+        return "outcome_unverified"
+    outcomes = {"Record_result": "role_assignment_removed_access_unverified", "Record_already_absent": "already_absent_access_unverified",
+                "Record_absent_after_unconfirmed_delete": "assignment_absent_delete_unconfirmed",
+                "Record_dry_run": "dry_run_no_mutation", "Record_assignment_forbidden": "assignment_read_forbidden",
+                "Record_assignment_throttled": "assignment_read_throttled", "Record_assignment_timeout": "assignment_read_timed_out",
+                "Record_assignment_unknown": "assignment_read_unknown", "Record_verification_forbidden": "absence_check_forbidden",
+                "Record_verification_throttled": "absence_check_throttled", "Record_verification_timeout": "absence_check_timed_out",
+                "Record_verification_unknown": "absence_check_unknown"}
+    observed = []
+    for row in data["value"]:
+        action = row.get("name")
+        if action in outcomes:
+            if str(row.get("id", "")).lower() != (prefix + action).lower():
+                return "outcome_unverified"
+            if row.get("properties", {}).get("status") == "Succeeded":
+                observed.append(outcomes[action])
+    return observed[0] if len(observed) == 1 else "outcome_unverified"
 
 
 def controlled_invoke(m: dict, state: dict, state_path, http: HTTP, operator: AzureCLI,
@@ -326,11 +383,11 @@ def controlled_invoke(m: dict, state: dict, state_path, http: HTTP, operator: Az
         # Disabling does NOT cancel active runs or prove containment.
         try:
             independent_shutdown(shutdown_proof, state, http, operator, timeout=cleanup_timeout)
-        except (RuntimeError, SafetyError, ValueError, KeyError):
+        except Exception:
             cleanup_errors.append("workflow_disabled_unverified")
         try:
             save(state_path, state)
-        except (OSError, RuntimeError, ValueError):
+        except Exception:
             cleanup_errors.append("shutdown_receipt_persistence_failed")
         try:
             if trigger_attempted and not state["last_run"]["name"] and not state["execution_state_unknown"]:
@@ -359,9 +416,13 @@ def controlled_invoke(m: dict, state: dict, state_path, http: HTTP, operator: Az
                     set(runs) - before != ({known} if known else set()) or
                     (known and state["last_run"]["status"] not in TERMINAL)):
                 raise RuntimeError("Terminal execution is not verified")
-        except (RuntimeError, SafetyError, ValueError, KeyError):
+        except Exception:
             state["execution_state_unknown"] = True
             cleanup_errors.append("run_terminal_state_unverified")
+        try:
+            state["last_run"]["response_outcome"] = executor_outcome(state, http, operator)
+        except Exception:
+            state["last_run"]["response_outcome"] = "outcome_unverified"
         # Restore only after the known run is terminal (or no trigger was sent),
         # complete inventory has no extra runs, and disable is GET-verified.
         if state["disabled_verified"] and not state["execution_state_unknown"]:
@@ -370,12 +431,78 @@ def controlled_invoke(m: dict, state: dict, state_path, http: HTTP, operator: Az
                 deploy(m, state, dry_run=True)
                 check_workflow(m, state, http, operator, dry_run=True, expected_state="Disabled")
                 state["safe_configuration_restored"] = True
-            except (RuntimeError, SafetyError, ValueError, KeyError):
+            except Exception:
                 cleanup_errors.append("safe_configuration_unverified")
         state["cleanup_problems"] = cleanup_errors
-        save(state_path, state)
+        try:
+            save(state_path, state)
+        except Exception:
+            cleanup_errors.append("final_cleanup_receipt_persistence_failed")
         if cleanup_errors:
             raise RuntimeError("Responder cleanup is incomplete; reconcile recorded private state before continuing")
+
+
+def disable_restore(m: dict, state: dict, state_path, http: HTTP, operator: AzureCLI,
+                    *, timeout: float = 120) -> None:
+    """Explicit fresh-ownership recovery; no prior shutdown receipt grants access.
+
+    Cancel only run names already recorded by this helper, at most 20. An unknown
+    queued run remains unresolved instead of being adopted from inventory.
+    """
+    problems = []
+    state.update(disabled_verified=False, safe_configuration_restored=False)
+    try:
+        assert_owned(m, m["subscription_id"])
+        check_workflow(m, state, http, operator, require_trigger_restrictions=False)
+        proof = ShutdownProof(workflow_path(m), m["lab_id"], m["tenant_id"], guid(state["responder_object_id"]), time.monotonic())
+        def fresh_guard():
+            assert_owned(m, m["subscription_id"])
+            check_workflow(m, state, http, operator, require_trigger_restrictions=False)
+        independent_shutdown(proof, state, http, operator, timeout=timeout, before_write=fresh_guard)
+    except Exception:
+        problems.append("workflow_disabled_unverified")
+    try:
+        runs = read_runs(state, http, operator)
+        known = set(state.get("recorded_run_names", []))
+        if state.get("last_run", {}).get("name"):
+            known.add(state["last_run"]["name"])
+        if len(known) > 20 or any(not isinstance(n, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,160}", n) for n in known):
+            raise RuntimeError("Recorded run set exceeds the bounded reconciliation contract")
+        active = {name for name, status in runs.items() if status not in TERMINAL}
+        if active - known:
+            raise RuntimeError("Unrecorded unfinished runs require exact-ID reconciliation")
+        for name in sorted(active):
+            assert_owned(m, m["subscription_id"])
+            check_workflow(m, state, http, operator, expected_state="Disabled", require_trigger_restrictions=False)
+            response = call(http, operator, "POST", state["workflow_id"] + "/runs/" + name + "/cancel?api-version=2016-06-01")
+            state.setdefault("reconciled_runs", {})[name] = {"cancel_acknowledged": response.status in {200, 202, 204} and not response.transport_error}
+        deadline = time.monotonic() + timeout
+        while True:
+            runs = read_runs(state, http, operator)
+            if all(status in TERMINAL for status in runs.values()):
+                state["execution_state_unknown"] = False
+                break
+            if time.monotonic() >= deadline:
+                raise RuntimeError("Run cancellation terminal state unverified")
+            time.sleep(min(3, max(0, deadline - time.monotonic())))
+    except Exception:
+        state["execution_state_unknown"] = True
+        problems.append("run_terminal_state_unverified")
+    if state["disabled_verified"] and not state.get("execution_state_unknown"):
+        try:
+            deploy(m, state, dry_run=True)
+            check_workflow(m, state, http, operator, dry_run=True, expected_state="Disabled")
+            state["safe_configuration_restored"] = True
+        except Exception:
+            problems.append("safe_configuration_unverified")
+    state["cleanup_problems"] = problems
+    state["reconciliation_observed_at"] = stamp()
+    try:
+        save(state_path, state)
+    except Exception:
+        problems.append("final_cleanup_receipt_persistence_failed")
+    if problems:
+        raise RuntimeError("disable-restore is incomplete; keep the receipt and reconcile exact IDs")
 
 
 def deploy(m: dict, state: dict, *, dry_run: bool) -> dict:
@@ -398,21 +525,24 @@ def main() -> int:
     parser.add_argument("--manifest", default="private/manifest.json")
     parser.add_argument("--subscription", required=True, type=guid)
     parser.add_argument("--confirm-lab-id", required=True, type=guid)
-    parser.add_argument("--operation", choices=["deploy", "grant", "dry-run", "invoke", "status"], required=True)
+    parser.add_argument("--operation", choices=["deploy", "grant", "dry-run", "invoke", "disable-restore", "status"], required=True)
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args()
     _, m = load_owned(args.manifest, args.subscription, args.confirm_lab_id)
     model = Manifest.from_dict(m)
     operator, http = AzureCLI(model, args.subscription), HTTP()
     guard = Guard(model, http, operator)
-    guard.ownership()
-    guard.actor()
+    if args.operation != "disable-restore":
+        guard.ownership()
+        guard.actor()
     state_path = private_path(str(ROOT / "private" / "responder-state.json"))
     if state_path.exists():
         state = json.loads(state_path.read_text(encoding="utf-8"))
         if state.get("lab_id") != m["lab_id"] or state.get("workflow_id") != workflow_path(m):
             raise RuntimeError("Recorded responder state does not belong to this lab")
-        if state.get("assignment") not in m["role_assignments"]:
+        if args.operation == "disable-restore":
+            Manifest.from_dict({**m, "role_assignments": [state["assignment"]]})
+        elif state.get("assignment") not in m["role_assignments"]:
             raise RuntimeError("Recorded target is no longer allowlisted")
     else:
         writers = [r for r in m["role_assignments"] if r["principal_id"] == m["actor"]["service_principal_object_id"]
@@ -442,6 +572,8 @@ def main() -> int:
             if existing.status != 404 or existing.transport_error:
                 raise RuntimeError("Initial responder grant requires absent recorded IDs; reconcile existing role/grant")
         assert_owned(m, args.subscription)
+        state.update(stage="responder_grant_planned", role_definition_id=role_id, role_assignment_id=grant_id)
+        save(state_path, state)
         az("deployment", "group", "create", "--subscription", args.subscription, "--resource-group", m["resource_group"],
            "--name", "storm3168-responder-rbac", "--template-file", str(ROOT / "infra" / "responder-rbac.bicep"),
            "--parameters", "expectedSubscriptionId=" + args.subscription, "labId=" + m["lab_id"],
@@ -456,6 +588,8 @@ def main() -> int:
         save(state_path, state)
     elif args.operation in {"dry-run", "invoke"}:
         controlled_invoke(m, state, state_path, http, operator, args.operation)
+    elif args.operation == "disable-restore":
+        disable_restore(m, state, state_path, http, operator)
     else:
         item = check_workflow(m, state, http, operator)
         print(json.dumps({"state": item["properties"].get("state"), "dryRun": item["properties"]["parameters"]["dryRun"]["value"],
@@ -469,6 +603,6 @@ def main() -> int:
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except (RuntimeError, ValueError, KeyError, SafetyError) as exc:
-        print(f"Playbook operation stopped: {exc}", file=sys.stderr)
+    except Exception:
+        print("Playbook operation stopped; inspect the private receipt and reconcile the exact owned workflow. No raw exception or provider payload is logged.", file=sys.stderr)
         raise SystemExit(1)

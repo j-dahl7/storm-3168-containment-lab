@@ -192,6 +192,60 @@
             },
             "else": {
               "actions": {
+                "Classify_assignment_forbidden": {
+                  "type": "If",
+                  "expression": "@equals(outputs('Read_assignment')?['statusCode'], 403)",
+                  "actions": {
+                    "Record_assignment_forbidden": {
+                      "type": "Compose",
+                      "inputs": {
+                        "status": "assignment_forbidden"
+                      }
+                    }
+                  },
+                  "else": {
+                    "actions": {
+                      "Classify_assignment_throttled": {
+                        "type": "If",
+                        "expression": "@equals(outputs('Read_assignment')?['statusCode'], 429)",
+                        "actions": {
+                          "Record_assignment_throttled": {
+                            "type": "Compose",
+                            "inputs": {
+                              "status": "assignment_throttled"
+                            }
+                          }
+                        },
+                        "else": {
+                          "actions": {
+                            "Classify_assignment_timeout": {
+                              "type": "If",
+                              "expression": "@equals(actions('Read_assignment')?['status'], 'TimedOut')",
+                              "actions": {
+                                "Record_assignment_timeout": {
+                                  "type": "Compose",
+                                  "inputs": {
+                                    "status": "assignment_timeout"
+                                  }
+                                }
+                              },
+                              "else": {
+                                "actions": {
+                                  "Record_assignment_unknown": {
+                                    "type": "Compose",
+                                    "inputs": {
+                                      "status": "assignment_unknown"
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
                 "Stop_unknown_assignment": {
                   "type": "Terminate",
                   "inputs": {
@@ -200,6 +254,11 @@
                       "code": "AssignmentReadUnknown",
                       "message": "Only 404 proves prior absence; no mutation was attempted."
                     }
+                  },
+                  "runAfter": {
+                    "Classify_assignment_forbidden": [
+                      "Succeeded"
+                    ]
                   }
                 }
               }
@@ -470,7 +529,9 @@
       },
       "runAfter": {
         "Delete_configured_assignment": [
-          "Succeeded"
+          "Succeeded",
+          "Failed",
+          "TimedOut"
         ]
       }
     },
@@ -478,20 +539,92 @@
       "type": "If",
       "expression": "@equals(outputs('Read_after_delete')?['statusCode'], 404)",
       "actions": {
-        "Record_result": {
-          "type": "Compose",
-          "inputs": {
-            "status": "role_assignment_removed_access_unverified",
-            "roleAssignmentId": "@parameters('targetRoleAssignmentId')",
-            "actorObjectId": "@parameters('actorObjectId')",
-            "checkedAt": "@utcNow()",
-            "workflowRunId": "@workflow().run.name",
-            "nextStep": "Run the independent fixed-token probe. This does not prove resource access is denied."
+        "Check_delete_acknowledgment": {
+          "type": "If",
+          "expression": "@or(equals(outputs('Delete_configured_assignment')?['statusCode'], 200), equals(outputs('Delete_configured_assignment')?['statusCode'], 202), equals(outputs('Delete_configured_assignment')?['statusCode'], 204))",
+          "actions": {
+            "Record_result": {
+              "type": "Compose",
+              "inputs": {
+                "status": "role_assignment_removed_access_unverified",
+                "roleAssignmentId": "@parameters('targetRoleAssignmentId')",
+                "actorObjectId": "@parameters('actorObjectId')",
+                "checkedAt": "@utcNow()",
+                "workflowRunId": "@workflow().run.name",
+                "nextStep": "Run the independent fixed-token probe. This does not prove resource access is denied."
+              }
+            }
+          },
+          "else": {
+            "actions": {
+              "Record_absent_after_unconfirmed_delete": {
+                "type": "Compose",
+                "inputs": {
+                  "status": "assignment_absent_delete_unconfirmed",
+                  "roleAssignmentId": "@parameters('targetRoleAssignmentId')",
+                  "checkedAt": "@utcNow()"
+                }
+              }
+            }
           }
         }
       },
       "else": {
         "actions": {
+          "Classify_verification_forbidden": {
+            "type": "If",
+            "expression": "@equals(outputs('Read_after_delete')?['statusCode'], 403)",
+            "actions": {
+              "Record_verification_forbidden": {
+                "type": "Compose",
+                "inputs": {
+                  "status": "verification_forbidden"
+                }
+              }
+            },
+            "else": {
+              "actions": {
+                "Classify_verification_throttled": {
+                  "type": "If",
+                  "expression": "@equals(outputs('Read_after_delete')?['statusCode'], 429)",
+                  "actions": {
+                    "Record_verification_throttled": {
+                      "type": "Compose",
+                      "inputs": {
+                        "status": "verification_throttled"
+                      }
+                    }
+                  },
+                  "else": {
+                    "actions": {
+                      "Classify_verification_timeout": {
+                        "type": "If",
+                        "expression": "@equals(actions('Read_after_delete')?['status'], 'TimedOut')",
+                        "actions": {
+                          "Record_verification_timeout": {
+                            "type": "Compose",
+                            "inputs": {
+                              "status": "verification_timeout"
+                            }
+                          }
+                        },
+                        "else": {
+                          "actions": {
+                            "Record_verification_unknown": {
+                              "type": "Compose",
+                              "inputs": {
+                                "status": "verification_unknown"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
           "Confirm_assignment_absent_rejected": {
             "type": "Terminate",
             "inputs": {
@@ -500,6 +633,11 @@
                 "code": "AbsenceNotVerified",
                 "message": "The exact assignment did not return HTTP 404. Do not mark containment successful."
               }
+            },
+            "runAfter": {
+              "Classify_verification_forbidden": [
+                "Succeeded"
+              ]
             }
           }
         }

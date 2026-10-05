@@ -14,9 +14,11 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
+sys.path.insert(0, str(ROOT / "scripts"))
 
 from stormlab.core import ARM, GRAPH, AzureCLI, Guard, HTTP, Manifest, SafetyError, guid, load_json, utc_now
 from stormlab.__main__ import private_root
+from trial_state import begin_trial, finish_trial, record_access_settling
 
 
 READER = "acdd72a7-3385-48ef-bd42-f606fba81ae7"
@@ -254,8 +256,23 @@ def main(argv=None) -> int:
             raise SafetyError("Lab confirmation mismatch")
         operator = AzureCLI(m, args.subscription)
         guard = Guard(m, HTTP(), operator)
-        result = configure(data, guard, args.mode, execute=args.execute, enable_actor=args.enable_actor,
-                           persist=lambda value: save_manifest(path, value))
+        lease_id = "access-" + str(uuid.uuid4())
+        if args.execute:
+            begin_trial(data, lease_id, check_settling=False)
+        complete = False
+        try:
+            if args.execute:
+                record_access_settling(data, complete=False)
+            result = configure(data, guard, args.mode, execute=args.execute, enable_actor=args.enable_actor,
+                               persist=lambda value: save_manifest(path, value))
+            if args.execute:
+                settling = record_access_settling(data, complete=True)
+                result.update(ready_after_epoch=settling["ready_after_epoch"], minimum_settling_seconds=600)
+            complete = True
+        finally:
+            if args.execute:
+                finish_trial(data, lease_id, cleanup_confirmed=complete,
+                             outcome="access_configured_baseline_required" if complete else "access_configuration_incomplete")
         # Exact IDs remain only in the ignored manifest/evidence; stdout is concise.
         print(json.dumps({k: v for k, v in result.items() if not k.endswith("assignment_id")}, sort_keys=True))
         return 0

@@ -27,6 +27,10 @@ Required parameters:
 - `executorName`: the existing manifest-owned guarded executor
 - `actorObjectId`, `targetRoleAssignmentId`, `targetRoleDefinitionId`,
   `targetRoleScope`: must exactly match the executor configuration
+- `notBeforeUtc`, `notAfterUtc`: explicit UTC trial window, positive and at most
+  two hours. Current time, incident creation and the exact alert's
+  `ProviderEventTime` must fall inside it. Current time is checked again immediately
+  before executor invocation. A new incident for an old delayed event is rejected.
 
 Safety parameters:
 
@@ -160,6 +164,43 @@ was accepted, not that deletion or containment succeeded. Inspect the executor
 run and the independent fixed-token capability results. Preserve event time,
 arrival time, incident time, dispatcher/executor times and final denied-operation
 time separately. No component claims a seven-minute response guarantee.
+
+## Exact post-trial reconciliation
+
+`scripts/sentinel_reconcile.py` separately disables recorded workflows, cancels
+recorded unfinished runs, verifies quiescence and closes exact lab incidents.
+It never searches for incidents to adopt. Its private receipt contains:
+
+- `schema_version: 1`, `lab_id`, `subscription_id`, exact `workspace_id`;
+- `analytic_rule_id` (UUID), `not_before_utc`, `not_after_utc`;
+- `incident_ids`: at most ten exact incident UUIDs;
+- `workflows`: one or two entries, each with exact `resource_id`, managed-identity
+  `principal_id`, `kind` (`dispatcher` or `executor`), and at most twenty exact
+  recorded `run_names`. A name missing from the receipt is never adopted.
+
+Offline plan:
+
+```powershell
+python scripts/sentinel_reconcile.py --manifest private/manifest.json `
+  --receipt private/sentinel-trial.json --output private/sentinel-reconcile.json
+```
+
+Explicit execution also requires `--execute`, `--subscription` and
+`--confirm-lab-id`, and must wait for the current review and live authorization.
+Each workflow stop uses fresh ownership guards and bounded retries. Only recorded
+unfinished runs are cancelled. Unknown queued runs or paginated inventory remain
+unresolved; no incident is closed while workflow quiescence remains unverified.
+Closure checks the exact workspace, sole analytic rule, lab, actor, resource,
+incident creation and provider-event time. It uses the incident ETag, preserves
+owner/labels, marks classification Undetermined and verifies readback. Closing a
+lab incident does not establish containment.
+
+The helper does not disable an analytic or automation binding or restore executor
+parameters. Disable the separately recorded bindings first; use the responder's
+`disable-restore` operation for later dry-run restoration. Advance the trial
+window before re-enabling the dispatcher. The `alertType == rule GUID` schema
+assumption still requires live preview confirmation; a mismatch fails closed.
+Neither helper establishes native delivery or exactly-once execution.
 
 ## Offline validation
 

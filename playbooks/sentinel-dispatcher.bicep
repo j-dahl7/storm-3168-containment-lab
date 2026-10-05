@@ -12,6 +12,10 @@ param actorObjectId string
 param targetRoleAssignmentId string
 param targetRoleDefinitionId string
 param targetRoleScope string
+@description('Fresh trial UTC lower bound. Old incidents and replayed trigger items are rejected.')
+param notBeforeUtc string
+@description('Trial UTC end, at most two hours after notBeforeUtc. Renew only for a separately reviewed trial.')
+param notAfterUtc string
 param dispatchEnabled bool = false
 param expectedExecutorDryRun bool = true
 @allowed(['', 'INVOKE_CONFIGURED_LAB_EXECUTOR'])
@@ -69,6 +73,8 @@ resource dispatcher 'Microsoft.Logic/workflows@2019-05-01' = if (ownsGroup) {
       targetRoleAssignmentId: { value: targetRoleAssignmentId }
       targetRoleDefinitionId: { value: targetRoleDefinitionId }
       targetRoleScope: { value: targetRoleScope }
+      notBeforeUtc: { value: notBeforeUtc }
+      notAfterUtc: { value: notAfterUtc }
       dispatchEnabled: { value: dispatchEnabled }
       expectedExecutorDryRun: { value: expectedExecutorDryRun }
       dispatchConfirmation: { value: dispatchConfirmation }

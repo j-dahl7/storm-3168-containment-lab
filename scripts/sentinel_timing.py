@@ -40,8 +40,9 @@ def singleton(details: dict, key: str) -> str:
     return values[0]
 
 
-def build_evidence(m: Manifest, incident: dict, alerts: dict, *, incident_id: str,
-                   analytic_rule_id: str, activity: dict, run: dict | None = None) -> dict:
+def validate_incident_evidence(m: Manifest, incident: dict, alerts: dict, *, incident_id: str,
+                               analytic_rule_id: str, not_before_utc: str | None = None,
+                               not_after_utc: str | None = None) -> dict:
     workspace = workspace_id(m)
     expected_incident = workspace + "/providers/Microsoft.SecurityInsights/incidents/" + guid(incident_id, "incident UUID")
     expected_rule = workspace + "/providers/Microsoft.SecurityInsights/alertRules/" + guid(analytic_rule_id, "analytic rule UUID")
@@ -64,6 +65,20 @@ def build_evidence(m: Manifest, incident: dict, alerts: dict, *, incident_id: st
     if not (resource.lower() == m.rg_id.lower() or resource.lower().startswith(m.rg_id.lower() + "/providers/")) or any(x in resource for x in ("..", "%", "?", "#", "\\")):
         raise SafetyError("Alert resource is outside the exact lab group")
     event_id = guid(singleton(details, "ProviderEventId"), "provider event UUID")
+    if not_before_utc is not None or not_after_utc is not None:
+        start, end = timestamp(not_before_utc), timestamp(not_after_utc)
+        created = timestamp(props.get("createdTimeUtc"))
+        provider = timestamp(singleton(details, "ProviderEventTime"))
+        if not start or not end or not created or not provider or not start <= created <= end or not start <= provider <= end:
+            raise SafetyError("Incident or provider event is outside the recorded trial window")
+    return {"incident_properties": props, "alert_properties": p, "resource_id": resource, "event_id": event_id}
+
+
+def build_evidence(m: Manifest, incident: dict, alerts: dict, *, incident_id: str,
+                   analytic_rule_id: str, activity: dict, run: dict | None = None) -> dict:
+    validated = validate_incident_evidence(m, incident, alerts, incident_id=incident_id, analytic_rule_id=analytic_rule_id)
+    props, p = validated["incident_properties"], validated["alert_properties"]
+    resource, event_id, workspace = validated["resource_id"], validated["event_id"], workspace_id(m)
     if activity.get("kind") != "provider_telemetry" or activity.get("mode") != "live_read_only":
         raise SafetyError("Activity evidence is not the read-only provider export schema")
     sources = [s for s in activity.get("sources", []) if s.get("source") == "AzureActivity"]
@@ -98,6 +113,7 @@ def build_evidence(m: Manifest, incident: dict, alerts: dict, *, incident_id: st
         differences["incident_to_workflow"]["status"] = "unattributed_clock_difference"
     return {"schema_version": 1, "kind": "sentinel_pipeline_clock_evidence", "mode": "live_read_only", "cloud_mutations": False,
             "observed_at": utc_now(), "lab_id": m.lab_id, "incident_id": incident_id, "analytic_rule_id": analytic_rule_id,
+            "system_alert_id": p.get("systemAlertId") if isinstance(p.get("systemAlertId"), str) and re.fullmatch(r"[A-Za-z0-9_-]{1,160}", p["systemAlertId"]) else None,
             "provider_event_id": event_id, "provider_match": "unique" if len(candidates) == 1 else "missing" if not candidates else "ambiguous",
             "provider_export_truncated": source.get("truncated", False), "clocks": clocks,
             "durations": differences,

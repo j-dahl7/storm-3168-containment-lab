@@ -99,6 +99,17 @@ class ExportTests(unittest.TestCase):
         result = self.perform("remove")
         self.assertEqual(result["status"], "absent_verified")
         self.assertEqual(sum(row[0] == "DELETE" for row in self.calls), 1)
+
+    def test_recorded_export_cleanup_does_not_depend_on_workspace(self):
+        self.perform()
+        self.tag = "no-longer-readable"
+        self.calls.clear()
+        with patch.object(ae, "assert_owned"):
+            result = ae.remove_recorded_export(self.data, self.state, self, Operator(),
+                confirm_lab_id=self.m.lab_id, persist=lambda s: self.receipts.append(copy.deepcopy(s)))
+        self.assertEqual(result["status"], "absent_verified")
+        self.assertFalse(any("Microsoft.OperationalInsights/workspaces/" in row[1] for row in self.calls))
+        self.assertEqual(sum(row[0] == "DELETE" for row in self.calls), 1)
         self.perform("remove")
         self.assertEqual(sum(row[0] == "DELETE" for row in self.calls), 1)
 

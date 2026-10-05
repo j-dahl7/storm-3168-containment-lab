@@ -3,10 +3,13 @@ from __future__ import annotations
 
 import csv
 import json
+import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "scripts"))
+from render_kql_replay import build as build_actual_replay
 
 
 def read_json(path: Path):
@@ -29,6 +32,8 @@ def main():
     principal = "22222222-2222-4222-8222-222222222222"
     sensitive = {
         "microsoft.storage/storageaccounts/listkeys/action",
+        "microsoft.storage/storageaccounts/listaccountsas/action",
+        "microsoft.storage/storageaccounts/listservicesas/action",
         "microsoft.storage/storageaccounts/regeneratekey/action",
         "microsoft.storage/storageaccounts/delete",
         "microsoft.authorization/locks/delete",
@@ -54,6 +59,7 @@ def main():
         if matched:
             matched_ids.add(row["EventDataId"])
     assert sorted(matched_ids) == sorted(expected["expected_unique_event_ids"])
+    assert (ROOT / "detections/replay-sensitive-operations.kql").read_text(encoding="utf-8") == build_actual_replay()
 
     matrix = documents["fixtures/test-matrix.json"]["cases"]
     assert len({c["case_id"] for c in matrix}) == len(matrix)

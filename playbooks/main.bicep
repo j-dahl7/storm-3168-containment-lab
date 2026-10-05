@@ -37,7 +37,7 @@ resource workflow 'Microsoft.Logic/workflows@2019-05-01' = if (ownsGroup) {
     // newer than this API version's published Bicep type definition.
     accessControl: any({
       triggers: {
-        allowedCallerIpAddresses: []
+        allowedCallerIpAddresses: [{ addressRange: '0.0.0.0-0.0.0.0' }]
         sasAuthenticationPolicy: { state: 'Disabled' }
       }
     })

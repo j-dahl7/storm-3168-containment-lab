@@ -24,6 +24,26 @@ from stormlab.core import ARM, AzureCLI, Guard, HTTP, Manifest, Response, Safety
 API = "?api-version=2023-05-01"
 
 
+def assert_storage_window(manifest: dict, state_path: str | Path, required_until_epoch: float) -> dict:
+    """Validate an explicit preparation receipt, never infer actual actor access."""
+    m = Manifest.from_dict(manifest)
+    state = json.loads(private_path(str(state_path)).read_text(encoding="utf-8"))
+    if (state.get("state_kind") != "storm3168_storage_baseline" or state.get("lab_id") != m.lab_id
+            or state.get("subscription_id") != m.subscription_id or state.get("storage_id", "").lower() != m.storage_id.lower()
+            or state.get("preparation_status") != "operator_seed_verified_actor_unverified"
+            or state.get("settings_restored") is not False or state.get("status") != "ready_for_separate_actor_baseline"
+            or not m.blob or m.blob["name"] != "baseline-" + guid(state.get("nonce", "")) + ".txt"):
+        raise SafetyError("Blob trial needs the exact active nonce preparation receipt")
+    prepared_path = private_path(state.get("prepared_manifest", ""))
+    prepared = Manifest.from_dict(json.loads(prepared_path.read_text(encoding="utf-8")))
+    if prepared.storage_id != m.storage_id or prepared.blob != m.blob:
+        raise SafetyError("Prepared manifest blob differs from selected trial blob")
+    deadline = datetime.fromisoformat(state["restoration_due_at"]).timestamp()
+    if not isinstance(required_until_epoch, (int, float)) or not time.time() < required_until_epoch < deadline:
+        raise SafetyError("Storage hold cannot cover the declared baseline/action/probe/cleanup deadline")
+    return {"restoration_due_at": state["restoration_due_at"], "sha256": state["sha256"], "nonce": state["nonce"]}
+
+
 def client_ip(value: str) -> str:
     try:
         address = ipaddress.ip_address(value)
@@ -227,6 +247,40 @@ def restore(guard: Guard, state: dict, execute: bool) -> dict:
     return {"status": "original_settings_verified", "settings_restored": True}
 
 
+def restore_with_retry(guard: Guard, state: dict, *, sleeper=time.sleep, persist=lambda _: None,
+                       clock=time.monotonic) -> dict:
+    """Retry restoration only, with ownership/drift checks repeated on every try.
+
+    Two minutes of backoff in total. A previous PATCH may have succeeded even if
+    its reply was lost; restore() first rereads and accepts the closed policy.
+    No retry relaxes the target, ownership or concurrent-drift validation.
+    """
+    deadline = clock() + 120
+    def try_persist():
+        # A broken local disk must not prevent a guarded cloud rollback.
+        try:
+            persist(state)
+        except BaseException:
+            state["receipt_persistence_unconfirmed"] = True
+    for attempt, delay in enumerate((0, 2, 4, 8, 16, 30, 30, 30), 1):
+        if attempt > 1 and clock() >= deadline:
+            break
+        if delay:
+            sleeper(min(delay, max(0, deadline - clock())))
+            if clock() >= deadline:
+                break
+        state["restoration_attempts"] = attempt
+        try_persist()
+        try:
+            return restore(guard, state, True)
+        except Exception:
+            state["restoration_status"] = "retry_pending" if attempt < 8 else "manual_restore_required"
+            try_persist()
+    state["restoration_status"] = "manual_restore_required"
+    try_persist()
+    raise SafetyError("Restoration unconfirmed after bounded retries; reconcile the private receipt")
+
+
 def prepare(data: dict, guard: Guard, ip: str, mode: str, enable_shared_key: bool,
             hold_seconds: int, state_path: Path, execute: bool, *, sleeper=time.sleep,
             announce=lambda x: print(json.dumps(x), flush=True)) -> dict:
@@ -303,11 +357,11 @@ def prepare(data: dict, guard: Guard, ip: str, mode: str, enable_shared_key: boo
     finally:
         credential = ""
         try:
-            result = restore(guard, state, True)
+            result = restore_with_retry(guard, state, sleeper=sleeper, persist=lambda value: save(state_path, value))
             state["restoration_status"] = result["status"]
             state["settings_restored"] = result["settings_restored"]
             state["status"] = "restored_after_seed" if state["preparation_status"] == "operator_seed_verified_actor_unverified" else "restored_after_incomplete_preparation"
-        except (SafetyError, RuntimeError, ValueError, KeyError, TypeError):
+        except BaseException:
             state.update(status="manual_restore_required", settings_restored=False)
         state["finished_at"] = datetime.now(timezone.utc).isoformat()
         save(state_path, state)
@@ -337,7 +391,7 @@ def main(argv=None) -> int:
         guard = Guard(model, HTTP(), AzureCLI(model, args.subscription))
         if args.action == "restore":
             state = json.loads(path.read_text(encoding="utf-8"))
-            result = restore(guard, state, args.execute)
+            result = restore_with_retry(guard, state, persist=lambda value: save(path, value)) if args.execute else restore(guard, state, False)
             if args.execute:
                 state.update(result)
                 save(path, state)
@@ -349,7 +403,11 @@ def main(argv=None) -> int:
         print(json.dumps(result))
         return 0
     except (SafetyError, RuntimeError, ValueError, OSError, KeyError, TypeError):
-        print("Storage baseline stopped; no automatic retry. Inspect the private receipt and restore status.", file=sys.stderr)
+        print("Storage baseline stopped; inspect the private receipt and bounded restoration status.", file=sys.stderr)
+        # Paths/IDs only; never echo service bodies, credentials or a SAS URL.
+        print("Recovery command (after checking receipt): python scripts/storage_baseline.py restore"
+              + " --manifest " + json.dumps(args.manifest) + " --subscription " + args.subscription
+              + " --state " + json.dumps(args.state) + " --execute --confirm-lab-id LAB_UUID_FROM_RECEIPT", file=sys.stderr)
         return 2
     except KeyboardInterrupt:
         print("Interrupted; inspect the private receipt for restoration status.", file=sys.stderr)

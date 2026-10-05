@@ -32,6 +32,10 @@ def main() -> int:
             errors.append(f"{relative}: token-shaped literal")
         if re.search(r"[?&]sig=[A-Za-z0-9%+/]{18,}", text):
             errors.append(f"{relative}: SAS-signature-shaped literal")
+        if re.search(r"(?i)\bAccountKey=[A-Za-z0-9+/]{32,}={0,2}", text):
+            errors.append(f"{relative}: storage-account-key-shaped literal")
+        if re.search(r"\b[A-Za-z0-9._~-]{2,}Q~[A-Za-z0-9._~-]{20,}\b", text):
+            errors.append(f"{relative}: client-secret-shaped literal")
         if "-----BEGIN PRIVATE KEY-----" in text and path.name != "validate_assets.py":
             errors.append(f"{relative}: private-key marker")
     tracked = subprocess.run(["git", "ls-files", "--cached"], cwd=ROOT, capture_output=True, text=True, check=True).stdout.splitlines()

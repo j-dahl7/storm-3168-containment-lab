@@ -9,8 +9,66 @@ import json
 import pathlib
 import sys
 import uuid
+import urllib.parse
 from lab_support import ROOT, assert_context, assert_owned, az, guid, private_path, rg_id, save
 from live_trial import graph_token, request
+
+
+def validate_identity_resume(manifest: dict) -> None:
+    """Allow only recorded pre-group stages; validate partial actor separately."""
+    sys.path.insert(0, str(ROOT / "src"))
+    from stormlab.core import Manifest
+    stages = manifest.get("stages")
+    prefix = ["resource-group-created", "foundation-created", "application-created", "service-principal-created"]
+    if stages not in [prefix[:2], prefix[:3], prefix]:
+        raise RuntimeError("Identity resume supports only recorded foundation/application/SP stages before group creation")
+    model_data = dict(manifest)
+    actor = model_data.pop("actor", None)
+    if manifest.get("role_assignments") or manifest.get("group"):
+        raise RuntimeError("Partial identity resume cannot reconcile later grants or groups")
+    Manifest.from_dict(model_data)
+    if len(stages) == 2:
+        if actor is not None:
+            raise RuntimeError("Unexpected actor on a foundation-only receipt")
+    else:
+        expected = {"application_object_id", "client_id"} | ({"service_principal_object_id"} if len(stages) == 4 else set())
+        if not isinstance(actor, dict) or set(actor) != expected:
+            raise RuntimeError("Partial actor receipt does not match its recorded stage")
+        for value in actor.values():
+            guid(value)
+
+
+def resume_application(manifest: dict, subscription: str) -> dict:
+    actor = manifest["actor"]
+    assert_owned(manifest, subscription)
+    app = request("GET", "https://graph.microsoft.com/v1.0/applications/" + guid(actor["application_object_id"]), graph_token(subscription))
+    if (app.get("id") != actor["application_object_id"] or app.get("appId") != actor["client_id"]
+            or app.get("displayName") != "storm3168-" + manifest["lab_id"]
+            or "storm3168LabId=" + manifest["lab_id"] not in app.get("tags", [])):
+        raise RuntimeError("Recorded application ownership/linkage changed")
+    return app
+
+
+def ensure_recorded_sp(manifest: dict, subscription: str, persist) -> dict:
+    """Reconcile only the SP linked to the already verified, recorded app ID."""
+    app = resume_application(manifest, subscription)
+    query = urllib.parse.urlencode({"$filter": "appId eq '" + guid(app["appId"]) + "'"})
+    found = request("GET", "https://graph.microsoft.com/v1.0/servicePrincipals?" + query, graph_token(subscription))
+    if found.get("@odata.nextLink") or not isinstance(found.get("value"), list) or len(found["value"]) > 1:
+        raise RuntimeError("Service-principal creation outcome is ambiguous")
+    if found["value"]:
+        sp = found["value"][0]
+        if (sp.get("appId") != app["appId"] or sp.get("servicePrincipalType") != "Application"
+                or sp.get("appOwnerOrganizationId") != manifest["tenant_id"]
+                or sp.get("displayName") != app["displayName"]):
+            raise RuntimeError("Existing service principal does not link to the recorded owned application")
+    else:
+        assert_owned(manifest, subscription)
+        sp = request("POST", "https://graph.microsoft.com/v1.0/servicePrincipals", graph_token(subscription), {"appId": app["appId"]})
+    manifest["actor"]["service_principal_object_id"] = guid(sp["id"])
+    manifest["stages"].append("service-principal-created")
+    persist(manifest)
+    return sp
 
 
 def main() -> int:
@@ -48,9 +106,10 @@ def main() -> int:
             parser.error("Resume requires --execute and the existing private manifest")
         manifest = json.loads(path.read_text(encoding="utf-8"))
         assert_owned(manifest, args.subscription)
-        expected_stages = ["resource-group-created"] if args.resume_empty_group else ["resource-group-created", "foundation-created", "application-created", "service-principal-created"]
-        if manifest.get("stages") != expected_stages:
+        if args.resume_empty_group and manifest.get("stages") != ["resource-group-created"]:
             raise RuntimeError("The recorded stage does not match the selected bounded resume mode")
+        if args.resume_identity:
+            validate_identity_resume(manifest)
         if manifest.get("location") != args.location or manifest.get("sentinel_enabled") != args.enable_sentinel:
             raise RuntimeError("Resume parameters must match the original recorded plan")
         lab_id = guid(manifest["lab_id"])
@@ -84,18 +143,20 @@ def main() -> int:
         manifest["stages"].append("foundation-created")
         save(path, manifest)
     display_name = f"storm3168-{lab_id}"
-    if not args.resume_identity:
+    if "application-created" not in manifest["stages"]:
+        # An unrecorded create outcome must be reconciled, never duplicated.
+        query = urllib.parse.urlencode({"$filter": "displayName eq '" + display_name + "'", "$select": "id"})
+        existing = request("GET", "https://graph.microsoft.com/v1.0/applications?" + query, graph_token(args.subscription))
+        if existing.get("@odata.nextLink") or not isinstance(existing.get("value"), list) or existing["value"]:
+            raise RuntimeError("A matching unrecorded application exists; reconcile the create outcome before resuming")
         assert_owned(manifest, args.subscription)
         application = request("POST", "https://graph.microsoft.com/v1.0/applications", graph_token(args.subscription),
                               {"displayName": display_name, "signInAudience": "AzureADMyOrg", "tags": ["storm3168LabId=" + lab_id]})
         manifest["actor"] = {"application_object_id": application["id"], "client_id": application["appId"]}
         manifest["stages"].append("application-created")
         save(path, manifest)
-        assert_owned(manifest, args.subscription)
-        service_principal = request("POST", "https://graph.microsoft.com/v1.0/servicePrincipals", graph_token(args.subscription), {"appId": application["appId"]})
-        manifest["actor"]["service_principal_object_id"] = service_principal["id"]
-        manifest["stages"].append("service-principal-created")
-        save(path, manifest)
+    if "service-principal-created" not in manifest["stages"]:
+        service_principal = ensure_recorded_sp(manifest, args.subscription, lambda value: save(path, value))
     else:
         sys.path.insert(0, str(ROOT / "src"))
         from stormlab.core import Manifest, AzureCLI, Guard, HTTP
@@ -105,7 +166,6 @@ def main() -> int:
         guard.actor()
         service_principal = {"id": manifest["actor"]["service_principal_object_id"]}
     assert_owned(manifest, args.subscription)
-    import urllib.parse
     query = urllib.parse.urlencode({"$filter": "displayName eq '" + display_name + "-access'", "$select": "id"})
     existing_groups = request("GET", "https://graph.microsoft.com/v1.0/groups?" + query, graph_token(args.subscription))
     if existing_groups.get("value"):

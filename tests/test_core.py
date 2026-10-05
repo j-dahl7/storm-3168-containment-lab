@@ -331,7 +331,7 @@ class GuardTests(unittest.TestCase):
     def test_mutation_transport_error_is_never_retried(self):
         self.http.probe_response = Response(0, transport_error=True)
         result = respond(self.guard, "rotate-key1", execute=True, confirm_lab_id=LAB)
-        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["status"], "indeterminate")
         self.assertEqual(result["outcome"], "transport_error")
         self.assertEqual(len(self.http.mutations), 1)
         self.assertEqual(self.guard.read_transport_retries, 0)

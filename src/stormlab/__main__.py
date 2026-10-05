@@ -151,7 +151,7 @@ def main(argv: list[str] | None = None) -> int:
             row = respond(guard, args.action, execute=args.execute, confirm_lab_id=args.confirm_lab_id, assignment_id=args.role_assignment_id)
             append_jsonl(output, row)
             print(json.dumps({key: row[key] for key in ("action", "status", "executed")}, sort_keys=True))
-            if row["status"] == "failed":
+            if row["status"] in {"failed", "indeterminate"}:
                 return 3
         return 0
     except (SafetyError, OSError, ValueError, TypeError, KeyError):
@@ -161,6 +161,11 @@ def main(argv: list[str] | None = None) -> int:
     except KeyboardInterrupt:
         print("Interrupted; retain partial evidence and inspect live state before retrying.", file=sys.stderr)
         return 130
+    except Exception:
+        # Final credential boundary: unexpected libraries must not echo a URL,
+        # response body, SAS, or token through an uncaught traceback.
+        print("Unexpected failure; retain partial evidence and reconcile private state before retrying.", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

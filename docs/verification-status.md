@@ -2,11 +2,34 @@
 
 Date: 2026-10-05. This is an implementation-readiness record, not the article's results table.
 
-## Review-remediation revision
+## Current second-review remediation
+
+Both full independent reports were available for this source pass. The
+[tracker](review-remediation.md) identifies the measurement fixes, cleanup
+changes and deliberate limits. The site also incorporates Claude's corrected
+visuals and replaces the draft's missing expectations with primary-source
+guidance. This revision is awaiting independent recheck, not accepted for the
+repeated measurement series.
+
+Final local checks for this pass: **262 tests passed** (238 harness/operator and
+24 workflow tests), both asset validators passed, all ten Bicep files compiled,
+and the offline demo and summary completed. The revised fixtures cover 18
+synthetic records; the generated actual-query replay also checks the full-batch
+selection. That new replay has not been executed in Kusto. The site's production
+and preview builds passed, drafts remained excluded from production, and all
+five visuals passed native/Arial/Verdana bounds checks. Desktop and 390px mobile
+preview checks found no broken images or page/table horizontal overflow.
+
+No Azure calls or mutations were made for this pass. CORE12 now has an explicit
+Blob-token path with storage-window checks; live data authorization is still a
+prerequisite. Phase 3 remains a manual multi-credential protocol. Provider event
+delivery, workflow acceptance and all containment timings remain unmeasured.
+
+## Previous review-remediation revision
 
 The owner's independent review identified measurement and shutdown defects in
 the initial implementation. The [remediation tracker](review-remediation.md)
-maps the supplied findings to changes and regression checks. This revision has
+now maps the full reports to changes and regression checks. That earlier revision had
 205 passing offline tests (187 harness/operator tests and 18 workflow tests),
 plus artifact validation and ten Bicep-file compilations. Those checks do not
 establish Azure runtime behavior.
@@ -34,7 +57,7 @@ the revised code. Claude's recheck precedes the first live response action.
 | Live foundation | A new tagged lab group, LRS storage, bounded-quota Log Analytics workspace and Sentinel onboarding were created in the selected lab subscription. | No VM or production-resource mutation. No new tenant-wide sign-in export was installed. |
 | Live identity setup | Dedicated application, service principal and security group created; direct writer and separate Reader grants recorded privately. | This establishes setup, not revocation timing. |
 | Live responder deployment | Disabled workflow and conditional grant accepted by ARM. The hardened operator helper completed an Azure runtime dry-run; exact permissions were read back, terminal state confirmed, Disabled verified, and dryRun=true/empty confirmation restored. | No destructive responder execution or containment result is claimed. Native Sentinel incident delivery remains untested. |
-| Live probe pilots | Initial temporary-credential issuance failed with AADSTS7000215; bounded initial retries later obtained a token. One pilot recorded successful canary tag writes before a subsequent failure. Temporary credentials were removed after every attempt. | Incomplete pilot runs and source changes during prototyping invalidate these as benchmark trials. No timing result is published. |
+| Live probe pilots | Four earlier pilot attempts were incomplete. Initial temporary-credential issuance failed with AADSTS7000215; bounded initial retries later obtained a token. One pilot recorded successful canary tag writes before a subsequent failure. Temporary credentials were removed after every attempt. | Incomplete pilot runs and source changes during prototyping invalidate these as benchmark trials. No timing result is published. |
 | Fixed-token control | One no-action ARM-read control completed at code revision `c6a71c354c2aadc4dd52f33f264bcf11c025e0e9`: three allowed baseline requests and three allowed post-control requests with the same frozen token; no source change during the run; temporary credential removal verified. | One control trial is not a three-trial response series or revocation measurement. |
 | Retained review environment | Responder Disabled and dry-run defaults verified. Canary service-principal sign-in disabled after the control; this was a maintenance action, not a timed experiment. Storage/workspace retained for review. | These state checks do not claim that previously issued tokens were invalidated. Retained resources can incur ordinary usage charges. |
 | Accepted containment series | **0 valid completed action series.** | Every scientific matrix case remains `not_tested` until three independent accepted trials and review. |

@@ -60,7 +60,8 @@ cannot establish loss of capabilities obtained from other grants or credentials.
 ## Secure manual invocation
 
 The Request trigger is named `manual`. Direct request-endpoint SAS authentication
-is disabled and direct caller-IP access is restricted to the empty list. Use the
+is disabled and direct caller-IP access is restricted to `0.0.0.0-0.0.0.0`.
+An empty IP list would mean "Only other Logic Apps", not no callers. Use the
 **ARM management operation**, with operator Entra authentication and appropriate
 workflow RBAC, instead of distributing a callback URL:
 
@@ -107,11 +108,15 @@ identity and configuration have been verified. In its `finally` block it attempt
 DISABLE before any further group lookup, run discovery or receipt write. That
 one safety operation first tries to re-read the exact workflow's ID, lab tag and
 managed-identity tuple. A successful read showing a mismatch refuses the write.
-An unavailable group or workflow read does not block the one exact DISABLE
-attempt authorized by the captured proof. The proof expires after 15 minutes,
-exists only in the invocation's memory, and is never restored from disk. Enable
-is refused unless sufficient proof lifetime remains for the bounded run and
-shutdown. It authorizes no enable, cancellation, RBAC change or deployment. An
+An unavailable group or workflow read does not block the exact DISABLE retry
+sequence authorized by the captured proof. The 15-minute proof-age limit prevents
+new activation; it never prevents the same invocation from stopping its workflow.
+The proof exists only in invocation memory and is never restored from disk. Enable
+is refused unless sufficient activation lifetime remains for the bounded run and
+shutdown. Transient stop failures, including CLI timeouts, retry with backoff for
+at most eight attempts within the chosen cleanup budget (maximum 120 seconds;
+an in-flight network/CLI call still has its own timeout). It authorizes no enable,
+cancellation, RBAC change or deployment. An
 unverified DISABLE outcome remains **unknown**; even an acknowledged POST needs
 a fresh exact identity and Disabled-state readback before being called disabled.
 
@@ -120,6 +125,21 @@ guarded cancellation and terminal-state verification. Restoring dry-run paramete
 still requires a fresh group ownership check. Receipts distinguish the disable
 POST acknowledgment, observed Disabled state, terminal execution and restored
 configuration; any uncertainty prevents another invocation until reconciled.
+
+Use the explicitly gated `scripts/playbook_lab.py --operation disable-restore`
+for later recovery, with the same manifest, `--subscription`, `--confirm-lab-id`
+and `--execute` flags. It takes fresh ownership evidence; a saved shutdown receipt
+never confers emergency authority in a new process. It disables the exact responder,
+cancels at most twenty recorded unfinished run names, verifies no unfinished run
+remains, then redeploys dry-run/Disabled and checks the result. Unrecorded or
+paginated run inventory stays unresolved. Role/grant IDs are now saved before
+their deployment request so an interrupted grant remains in the cleanup allowlist.
+
+The operator receipt also records the executor's distinct response outcome from
+exact run-action metadata: dry run, already absent, removal observed, forbidden,
+throttled, timeout, or unverified. It does not follow run-history SAS output links.
+An uncertain DELETE is followed by an exact postcondition read; absence after an
+unacknowledged DELETE is recorded separately from an acknowledged role removal.
 
 ## Native Sentinel integration
 

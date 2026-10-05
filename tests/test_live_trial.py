@@ -23,7 +23,7 @@ KEY = "88888888-8888-4888-8888-888888888888"
 
 
 class LiveTrialProtocolTests(unittest.TestCase):
-    def exercise(self, *, action="sp-disable", baseline_count=2, lost_creation_reply=False):
+    def exercise(self, *, action="sp-disable", capability="arm-tag-write", baseline_count=2, lost_creation_reply=False, cleanup_interrupt=False, post_interrupt=False):
         (ROOT / "private").mkdir(exist_ok=True)
         with tempfile.TemporaryDirectory(dir=ROOT / "private") as temp:
             manifest_path = Path(temp) / "manifest.json"
@@ -52,11 +52,13 @@ class LiveTrialProtocolTests(unittest.TestCase):
                     return {"keyId": KEY, "secretText": "fictional-in-memory-secret"}
                 if url.endswith("/removePassword"):
                     self.assertEqual(payload, {"keyId": KEY})
+                    if cleanup_interrupt:
+                        raise KeyboardInterrupt()
                     state["credentials"] = []
                     return {}
                 if "oauth2/v2.0/token" in url:
                     state["token_calls"] += 1
-                    issued = fake_token(exp=time.time() + 3600, iat=time.time(), jti=str(state["token_calls"]))
+                    issued = fake_token(exp=time.time() + 3600, iat=time.time(), jti=str(state["token_calls"]), aud=form["scope"].removesuffix(".default"))
                     state["issued"].append(issued)
                     return {"access_token": issued}
                 if "/servicePrincipals/" in url:
@@ -71,13 +73,17 @@ class LiveTrialProtocolTests(unittest.TestCase):
                     count = baseline_count if output.name == "baseline.jsonl" else 1
                     run = str(uuid.uuid4())
                     identity = {"run_id": run, "credential_label": arguments[arguments.index("--credential-label") + 1],
-                                "capability": "arm-tag-write", "auth": "bearer"}
+                                "capability": capability, "auth": "bearer"}
                     claims = claims_from_token(env["STORMLAB_PROBE_TOKEN"])
                     rows = [{"kind": "run_start", "token_metadata": {key: claims.get(key) for key in ("aud", "iat", "exp")}, **identity}]
                     for n in range(count):
                         now = utc_now()
                         rows.append({"kind": "probe", "outcome": "allowed", "http_status": 200,
                                      "timestamp": now, "request_started_at": now, "response_received_at": now, **identity})
+                    output.write_text("\n".join(json.dumps(row) for row in rows))
+                    if post_interrupt and output.name == "post-action.jsonl":
+                        raise KeyboardInterrupt()
+                    rows.append({"kind": "run_end", "run_id": run, "status": "completed"})
                     output.write_text("\n".join(json.dumps(row) for row in rows))
                 else:
                     state["responded"] = True
@@ -89,27 +95,35 @@ class LiveTrialProtocolTests(unittest.TestCase):
                                                  "status": "configuration_verified_capability_unproven", "postcondition_verified": True}) + "\n")
 
             argv = ["live_trial.py", "--manifest", str(manifest_path), "--subscription", SUB,
-                    "--confirm-lab-id", LAB, "--action", action, "--duration", "20", "--execute", "--check-new-token"]
+                    "--confirm-lab-id", LAB, "--action", action, "--capability", capability, "--duration", "20", "--execute", "--check-new-token"]
+            if capability == "blob-read":
+                argv.extend(["--storage-baseline-state", str(Path(temp) / "storage.json")])
             failure = None
             with patch.object(sys, "argv", argv), patch.object(live_trial, "load_owned", return_value=(manifest_path, manifest)), \
                  patch.object(live_trial, "private_path", side_effect=isolated_private_path), \
                  patch.object(live_trial, "assert_owned"), patch.object(live_trial, "graph_token", return_value="operator-only"), \
+                 patch.object(live_trial, "begin_trial"), patch.object(live_trial, "finish_trial") as finished, \
+                 patch.object(live_trial, "assert_storage_window", return_value={"valid": True}) as prepared, \
                  patch.object(live_trial, "request", side_effect=request), patch.object(live_trial, "invoke_harness", side_effect=harness), \
                  patch.object(live_trial.subprocess, "run", return_value=SimpleNamespace(returncode=0, stdout="a" * 40)), \
                  contextlib.redirect_stdout(io.StringIO()):
                 try:
                     result = live_trial.main()
                     self.assertEqual(result, 0)
-                except RuntimeError as exc:
+                except BaseException as exc:
                     failure = str(exc)
+                    state["failure_type"] = type(exc).__name__
+                state["finish_cleanup_confirmed"] = finished.call_args.kwargs["cleanup_confirmed"]
+                state["storage_checks"] = prepared.call_count
             receipt_path = next((Path(temp) / "runs").rglob("trial.json"))
             receipt_text = receipt_path.read_text()
             self.assertNotIn("fictional-in-memory-secret", receipt_text)
             self.assertNotIn("frozen-probe", receipt_text)
             self.assertNotIn("separate-issuance-control", receipt_text)
             receipt = json.loads(receipt_text)
-            self.assertTrue(receipt["credential_removed"])
-            self.assertEqual(state["credentials"], [])
+            if not cleanup_interrupt:
+                self.assertTrue(receipt["credential_removed"])
+                self.assertEqual(state["credentials"], [])
             return state, receipt, failure
 
     def test_new_issuance_never_replaces_probe_and_action_receipt_is_local(self):
@@ -131,6 +145,28 @@ class LiveTrialProtocolTests(unittest.TestCase):
         self.assertIn("transport failure", failure)
         self.assertEqual(receipt["credential_key_id"], KEY)
         self.assertFalse(state["responded"])
+
+    def test_cleanup_keyboard_interrupt_persists_unconfirmed_receipt_then_reraises(self):
+        state, receipt, failure = self.exercise(cleanup_interrupt=True)
+        self.assertEqual(state["failure_type"], "KeyboardInterrupt")
+        self.assertEqual(receipt["status"], "interrupted")
+        self.assertFalse(receipt["credential_removed"])
+        self.assertIn("cleanup_required", receipt)
+        self.assertFalse(state["finish_cleanup_confirmed"])
+
+    def test_partial_post_action_run_id_is_saved_after_interrupt(self):
+        state, receipt, failure = self.exercise(post_interrupt=True)
+        self.assertEqual(state["failure_type"], "KeyboardInterrupt")
+        self.assertIn("post_action", receipt["probe_runs"])
+        self.assertEqual(receipt["probe_phase_status"]["post_action"], "incomplete")
+        self.assertEqual(receipt["status"], "interrupted")
+
+    def test_core12_uses_storage_audience_and_prepared_window_checks(self):
+        state, receipt, failure = self.exercise(capability="blob-read")
+        self.assertIsNone(failure)
+        self.assertEqual(receipt["frozen_token_metadata"]["aud"], "https://storage.azure.com/")
+        self.assertEqual(receipt["separate_new_token_check"]["token_metadata"]["aud"], "https://storage.azure.com/")
+        self.assertEqual(state["storage_checks"], 2)
 
 
 if __name__ == "__main__":

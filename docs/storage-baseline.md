@@ -33,7 +33,7 @@ The receipt and blob are synthetic preparation evidence. A successful **operator
 - It does not hand credentials to another process. A manually prepared frozen credential uses the harness's --token-env, --key-env or --sas-env interface.
 - It does not expose production accounts, adopt foreign containers, or bypass locks.
 - It does not make the source-IP rule expire inside Azure. Process termination or loss of operator access can prevent finally from running.
-- It does not wait indefinitely for firewall propagation or retry a mutation automatically. A failed upload remains an invalid baseline.
+- It does not retry canary creation/upload or automatically extend a hold. A failed upload remains an invalid baseline. Restoration alone has bounded retries of the original closed settings.
 - It does not establish a working private-endpoint path. This is an explicitly selected public-endpoint canary test.
 
 Do not run ReadOnly-lock experiments during the hold: the lock can block restoration. Finish the data-plane trial, verify restoration, then start a separately scoped prevention case.
@@ -46,15 +46,21 @@ Inspect that plan. Execution again requires --execute and --confirm-lab-id LAB_U
 
 Restoration only returns to the validated closed policy; it will not restore a user-supplied broad allow policy. Read and retain the receipt's preparation_status, restoration_status and settings_restored separately. If restoration is unconfirmed, stop additional trials and reconcile the exact account immediately.
 
+Restoration makes at most eight guarded attempts with a 120-second monotonic retry budget and bounded backoff. Every attempt rereads ownership/current settings; a lost PATCH reply can be reconciled as already closed. A request already in flight can finish after the budget, so this is not a hard network deadline. A local receipt-write failure does not suppress rollback; it marks persistence unconfirmed. Final state-write failures still require reconciliation even if the in-memory restore succeeded. The helper prints a credential-free restore command on failure. Hard termination can prevent all cleanup.
+
 The restoration timestamp is part of the experiment boundary: after firewall closure, a blob denial can be caused by the network rather than the tested credential response. End probing before the hold deadline and compare with an independently healthy control during the observation window.
 
-Select --hold-seconds **before** preparation to cover actor baseline establishment + response action + full post-action probe window + cleanup margin. The live-trial runner uses 900 seconds for RBAC/group response defaults and 300 seconds for other short observations. CORE05/CORE06/CORE12 lifetime observations require explicit --until-token-expiry, bounded to 7200 seconds. In particular, a 60–90-minute CORE12 Blob-token run cannot use the 600-second preparation default. The 7800-second maximum permits a bounded two-hour probe plus up to ten minutes of declared overhead; it does not guarantee that overhead is sufficient. Compare the receipt's hold_started_at/restoration_due_at with the trial plan and refuse to start a trial that cannot fit. Never extend the hold automatically during a live trial.
+Select --hold-seconds **before** preparation to cover actor baseline establishment + response action + full post-action probe window + cleanup margin. The live-trial runner uses 900 seconds for RBAC/group response defaults. Token-bound actions default to expiry plus a 60-second margin, capped at 7200 seconds, with 60-second post-action spacing. Explicit shorter --duration values are censored observations. In particular, a 60–90-minute CORE12 Blob-token run cannot use the 600-second preparation default. The 7800-second maximum permits a bounded two-hour probe plus up to ten minutes of declared overhead; it does not guarantee that overhead is sufficient. Never extend the hold automatically during a live trial.
+
+CORE12 is implemented through scripts/live_trial.py with --capability blob-read and the explicit --storage-baseline-state private/storage-baseline-01.json. It requests a Storage-audience token and validates that the selected prepared nonce blob matches the active receipt. The receipt must cover a worst-case budget before credential creation and the actual expiry window before response, both with a 300-second margin. The runner grants no Blob data role: prepare that exact actor permission separately and verify successful actor reads. Source tests are not live CORE12 acceptance.
 
 ## Credential matrix and cost
 
 Core key1 and key2 regeneration are **separate configurations**, each with a fresh successful baseline and at least three independent trials. Other credential classes can be observed in the same configuration trial, but a key2 observation after rotating key1 does not count as a key2-rotation trial.
 
 Existing --auth bearer, shared-key and sas probes use the prepared manifest's exact blob. SAS must be read-only, HTTPS and explicitly expiring; no SAS URI or signature is saved.
+
+Phase 3 has a [manual parallel-channel protocol](phase3-manual.md) and an offline linkage helper. It has no automatic multi-credential issuance/action runner. That orchestration remains a limitation for a full repeated series; do not present it as automatic or live-verified.
 
 The tiny nonce blob and a bounded number of requests keep storage usage small, but this is not a spending cap. Storage/Log Analytics/Sentinel and any later playbook charges remain applicable. No VM, private endpoint, new license or paid feed is provisioned by this helper.
 

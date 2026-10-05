@@ -3,13 +3,13 @@ V01,1,baseline,fixed_arm_token,arm-read,3,0,not_tested,,,,See docs/test-plan.md;
 V02,1,baseline,fixed_arm_token,arm-tag-write,3,0,not_tested,,,,See docs/test-plan.md; unavailable or optional capabilities remain not_tested
 V03,1,baseline,fixed_arm_token,listkeys,3,0,not_tested,,,,See docs/test-plan.md; unavailable or optional capabilities remain not_tested
 V04,1,baseline,fixed_blob_token,blob-read,3,0,not_tested,,,,See docs/test-plan.md; unavailable or optional capabilities remain not_tested
-C1A,2,direct-role-delete,fixed_arm_token,arm-read_or_allowed_canary_write,3,0,not_tested,,,,See docs/test-plan.md; unavailable or optional capabilities remain not_tested
+C1A,2,direct-role-delete,fixed_arm_token,arm-tag-write_or_listkeys,3,0,not_tested,,,,See docs/test-plan.md; unavailable or optional capabilities remain not_tested
 C1B,2,direct-role-delete,fixed_blob_token,blob-read,3,0,not_tested,,,,See docs/test-plan.md; unavailable or optional capabilities remain not_tested
 C1N,2,direct-role-delete,recorded_client_credential,new-token-issuance,3,0,not_tested,,,,See docs/test-plan.md; unavailable or optional capabilities remain not_tested
-C2A,2,group-role-delete,fixed_arm_token,arm-read_or_allowed_canary_write,3,0,not_tested,,,,See docs/test-plan.md; unavailable or optional capabilities remain not_tested
+C2A,2,group-role-delete,fixed_arm_token,arm-tag-write_or_listkeys,3,0,not_tested,,,,See docs/test-plan.md; unavailable or optional capabilities remain not_tested
 C2B,2,group-role-delete,fixed_blob_token,blob-read,3,0,not_tested,,,,See docs/test-plan.md; unavailable or optional capabilities remain not_tested
 C2N,2,group-role-delete,recorded_client_credential,new-token-issuance,3,0,not_tested,,,,See docs/test-plan.md; unavailable or optional capabilities remain not_tested
-C3A,2,group-member-remove,fixed_arm_token,arm-read_or_allowed_canary_write,3,0,not_tested,,,,See docs/test-plan.md; unavailable or optional capabilities remain not_tested
+C3A,2,group-member-remove,fixed_arm_token,arm-tag-write_or_listkeys,3,0,not_tested,,,,See docs/test-plan.md; unavailable or optional capabilities remain not_tested
 C3B,2,group-member-remove,fixed_blob_token,blob-read,3,0,not_tested,,,,See docs/test-plan.md; unavailable or optional capabilities remain not_tested
 C3N,2,group-member-remove,recorded_client_credential,new-token-issuance,3,0,not_tested,,,,See docs/test-plan.md; unavailable or optional capabilities remain not_tested
 C4A,2,sp-disable,fixed_arm_token,arm-read_or_allowed_canary_write,3,0,not_tested,,,,See docs/test-plan.md; unavailable or optional capabilities remain not_tested

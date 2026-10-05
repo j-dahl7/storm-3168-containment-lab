@@ -219,6 +219,64 @@ class BaselineSafetyTests(unittest.TestCase):
         self.assertEqual(result["restoration_due_at"], (start + timedelta(seconds=5400)).isoformat())
         self.assertTrue(result["settings_restored"])
 
+    def test_restore_retries_transient_failure_then_verifies(self):
+        receipt = state()
+        sleep = Mock()
+        with patch.object(baseline, "restore", side_effect=[SafetyError("HTTP 429"), SafetyError("HTTP 503"), {"status": "original_settings_verified", "settings_restored": True}]) as attempt:
+            result = baseline.restore_with_retry(Mock(m=M), receipt, sleeper=sleep)
+        self.assertTrue(result["settings_restored"])
+        self.assertEqual(attempt.call_count, 3)
+        self.assertEqual([x.args[0] for x in sleep.call_args_list], [2, 4])
+
+    def test_restore_retry_budget_is_bounded_and_never_claims_success(self):
+        receipt = state()
+        sleep = Mock()
+        with patch.object(baseline, "restore", side_effect=SafetyError("Unavailable")) as attempt:
+            with self.assertRaises(SafetyError):
+                baseline.restore_with_retry(Mock(m=M), receipt, sleeper=sleep)
+        self.assertEqual(attempt.call_count, 8)
+        self.assertEqual(sum(x.args[0] for x in sleep.call_args_list), 120)
+        self.assertEqual(receipt["restoration_status"], "manual_restore_required")
+
+    def test_restore_runs_despite_receipt_disk_failure(self):
+        receipt = state()
+        with patch.object(baseline, "restore", side_effect=[SafetyError("HTTP 503"), {"status": "verified", "settings_restored": True}]) as attempt:
+            result = baseline.restore_with_retry(Mock(m=M), receipt, sleeper=Mock(), persist=Mock(side_effect=OSError("disk full")))
+        self.assertTrue(result["settings_restored"])
+        self.assertEqual(attempt.call_count, 2)
+        self.assertTrue(receipt["receipt_persistence_unconfirmed"])
+
+    def test_slow_restore_attempt_consumes_retry_budget(self):
+        receipt = state()
+        clock = Mock(side_effect=[0, 121])
+        with patch.object(baseline, "restore", side_effect=SafetyError("slow timeout")) as attempt:
+            with self.assertRaises(SafetyError):
+                baseline.restore_with_retry(Mock(m=M), receipt, sleeper=Mock(), clock=clock)
+        self.assertEqual(attempt.call_count, 1)
+
+    def test_storage_window_requires_exact_active_blob_and_sufficient_deadline(self):
+        with tempfile.TemporaryDirectory() as directory:
+            prepared = json.loads(json.dumps(DATA))
+            prepared["blob"]["name"] = "baseline-" + NONCE + ".txt"
+            manifest_path = Path(directory) / "manifest.json"
+            manifest_path.write_text(json.dumps(prepared))
+            receipt = {**state(), "nonce": NONCE, "prepared_manifest": str(manifest_path),
+                       "preparation_status": "operator_seed_verified_actor_unverified",
+                       "settings_restored": False, "status": "ready_for_separate_actor_baseline",
+                       "restoration_due_at": datetime.fromtimestamp(3000, timezone.utc).isoformat(), "sha256": "synthetic"}
+            path = Path(directory) / "state.json"
+            path.write_text(json.dumps(receipt))
+            with patch.object(baseline, "private_path", side_effect=Path), patch.object(baseline.time, "time", return_value=1000):
+                self.assertEqual(baseline.assert_storage_window(prepared, path, 2500)["nonce"], NONCE)
+                with self.assertRaises(SafetyError):
+                    baseline.assert_storage_window(prepared, path, 3001)
+                with self.assertRaises(SafetyError):
+                    baseline.assert_storage_window(DATA, path, 2500)
+                receipt["settings_restored"] = True
+                path.write_text(json.dumps(receipt))
+                with self.assertRaises(SafetyError):
+                    baseline.assert_storage_window(prepared, path, 2500)
+
 
 if __name__ == "__main__":
     unittest.main()

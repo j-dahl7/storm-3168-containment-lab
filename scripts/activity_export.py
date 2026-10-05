@@ -78,7 +78,14 @@ class ActivityExport:
         if confirm_lab_id != self.m.lab_id or operation not in {"create", "remove", "status"}:
             raise SafetyError("Explicit operation and matching lab confirmation required")
         validate_state(self.m, state)
-        self.owned_destination()
+        # Removing the exact recorded export does not depend on a still-existing
+        # destination workspace. The live RG tag and live setting's exact
+        # destination/category remain mandatory. This permits cleanup after a
+        # partial workspace teardown without adopting a different destination.
+        if operation == "create":
+            self.owned_destination()
+        else:
+            assert_owned(self.data, self.m.subscription_id)
         current = self.read_setting(state)
         if operation == "status":
             return {"status": "present_verified" if current else "absent_verified", "cloud_mutations": False}
@@ -101,7 +108,7 @@ class ActivityExport:
                 state["stage"] = "absent_verified"
                 persist(state)
                 return {"status": state["stage"], "cloud_mutations": False}
-            self.owned_destination()
+            assert_owned(self.data, self.m.subscription_id)
             self.read_setting(state)
             state.update(stage="remove_planned", requested_at=utc_now())
             persist(state)
@@ -117,6 +124,17 @@ class ActivityExport:
         state.update(stage="present_verified" if current else "absent_verified", observed_at=utc_now())
         persist(state)
         return {"status": state["stage"], "cloud_mutations": True, "subscription_wide_category": "Administrative"}
+
+
+def remove_recorded_export(data: dict, state: dict, http: HTTP, operator: AzureCLI, *,
+                           confirm_lab_id: str, persist) -> dict:
+    """Cleanup integration: only a supplied validated exact recorded setting.
+
+    Caller gates --execute/explicit subscription and loads same-clone private
+    state. No workspace lookup or export enumeration; retains all other settings.
+    """
+    return ActivityExport(data, http, operator).perform("remove", state,
+        confirm_lab_id=confirm_lab_id, acknowledge_subscription_wide=False, persist=persist)
 
 
 def main(argv=None) -> int:

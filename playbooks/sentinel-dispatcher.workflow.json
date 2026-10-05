@@ -47,6 +47,12 @@
     "$connections": {
       "type": "Object",
       "defaultValue": {}
+    },
+    "notBeforeUtc": {
+      "type": "String"
+    },
+    "notAfterUtc": {
+      "type": "String"
     }
   },
   "triggers": {
@@ -102,6 +108,35 @@
       },
       "runAfter": {}
     },
+    "Check_trial_window": {
+      "type": "If",
+      "expression": "@and(greater(ticks(parameters('notAfterUtc')), ticks(parameters('notBeforeUtc'))), lessOrEquals(sub(ticks(parameters('notAfterUtc')), ticks(parameters('notBeforeUtc'))), 72000000000), greaterOrEquals(ticks(utcNow()), ticks(parameters('notBeforeUtc'))), lessOrEquals(ticks(utcNow()), ticks(parameters('notAfterUtc'))))",
+      "actions": {
+        "Check_trial_window_ok": {
+          "type": "Compose",
+          "inputs": "validated"
+        }
+      },
+      "else": {
+        "actions": {
+          "Check_trial_window_reject": {
+            "type": "Terminate",
+            "inputs": {
+              "runStatus": "Failed",
+              "runError": {
+                "code": "StaleLabTrial",
+                "message": "Incident or invocation falls outside the configured lab trial window; no executor invocation."
+              }
+            }
+          }
+        }
+      },
+      "runAfter": {
+        "Validate_dispatch_configuration": [
+          "Succeeded"
+        ]
+      }
+    },
     "Validate_incident_address": {
       "type": "If",
       "expression": "@and(equals(toLower(string(triggerBody()?['object']?['id'])), toLower(concat(parameters('workspaceResourceId'), '/providers/Microsoft.SecurityInsights/incidents/', last(split(string(triggerBody()?['object']?['id']), '/'))))), equals(length(last(split(string(triggerBody()?['object']?['id']), '/'))), 36), not(contains(string(triggerBody()?['object']?['id']), '?')), not(contains(string(triggerBody()?['object']?['id']), '#')), not(contains(string(triggerBody()?['object']?['id']), '%')), not(contains(string(triggerBody()?['object']?['id']), '..')))",
@@ -126,7 +161,7 @@
         }
       },
       "runAfter": {
-        "Validate_dispatch_configuration": [
+        "Check_trial_window": [
           "Succeeded"
         ]
       }
@@ -214,6 +249,35 @@
         ]
       }
     },
+    "Check_incident_freshness": {
+      "type": "If",
+      "expression": "@and(greaterOrEquals(ticks(string(body('Read_incident')?['properties']?['createdTimeUtc'])), ticks(parameters('notBeforeUtc'))), lessOrEquals(ticks(string(body('Read_incident')?['properties']?['createdTimeUtc'])), ticks(parameters('notAfterUtc'))), lessOrEquals(ticks(string(body('Read_incident')?['properties']?['createdTimeUtc'])), ticks(utcNow())))",
+      "actions": {
+        "Check_incident_freshness_ok": {
+          "type": "Compose",
+          "inputs": "validated"
+        }
+      },
+      "else": {
+        "actions": {
+          "Check_incident_freshness_reject": {
+            "type": "Terminate",
+            "inputs": {
+              "runStatus": "Failed",
+              "runError": {
+                "code": "StaleLabTrial",
+                "message": "Incident or invocation falls outside the configured lab trial window; no executor invocation."
+              }
+            }
+          }
+        }
+      },
+      "runAfter": {
+        "Read_incident": [
+          "Succeeded"
+        ]
+      }
+    },
     "Check_incident_rule": {
       "type": "If",
       "expression": "@and(equals(toLower(string(body('Read_incident')?['id'])), toLower(string(triggerBody()?['object']?['id']))), equals(length(coalesce(body('Read_incident')?['properties']?['relatedAnalyticRuleIds'], json('[]'))), 1), equals(toLower(string(first(coalesce(body('Read_incident')?['properties']?['relatedAnalyticRuleIds'], json('[\"\"]'))))), toLower(parameters('analyticRuleResourceId'))), or(equals(body('Read_incident')?['properties']?['status'], 'New'), equals(body('Read_incident')?['properties']?['status'], 'Active')))",
@@ -238,7 +302,7 @@
         }
       },
       "runAfter": {
-        "Read_incident": [
+        "Check_incident_freshness": [
           "Succeeded"
         ]
       }
@@ -338,7 +402,8 @@
             "ActorObjectId",
             "LabId",
             "ResourceId",
-            "ProviderEventId"
+            "ProviderEventId",
+            "ProviderEventTime"
           ],
           "properties": {
             "ActorObjectId": {
@@ -369,6 +434,15 @@
               }
             },
             "ProviderEventId": {
+              "type": "array",
+              "minItems": 1,
+              "maxItems": 1,
+              "items": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "ProviderEventTime": {
               "type": "array",
               "minItems": 1,
               "maxItems": 1,
@@ -423,6 +497,35 @@
         ]
       }
     },
+    "Check_provider_event_freshness": {
+      "type": "If",
+      "expression": "@and(greaterOrEquals(ticks(first(body('Parse_custom_details')?['ProviderEventTime'])), ticks(parameters('notBeforeUtc'))), lessOrEquals(ticks(first(body('Parse_custom_details')?['ProviderEventTime'])), ticks(parameters('notAfterUtc'))), lessOrEquals(ticks(first(body('Parse_custom_details')?['ProviderEventTime'])), ticks(utcNow())))",
+      "actions": {
+        "Check_provider_event_freshness_ok": {
+          "type": "Compose",
+          "inputs": "provider_event_in_trial_window"
+        }
+      },
+      "else": {
+        "actions": {
+          "Check_provider_event_freshness_reject": {
+            "type": "Terminate",
+            "inputs": {
+              "runStatus": "Failed",
+              "runError": {
+                "code": "StaleProviderEvent",
+                "message": "Provider event is outside the exact trial window; no invocation."
+              }
+            }
+          }
+        }
+      },
+      "runAfter": {
+        "Check_evidence_scope": [
+          "Succeeded"
+        ]
+      }
+    },
     "Read_executor": {
       "type": "Http",
       "inputs": {
@@ -445,7 +548,7 @@
         }
       },
       "runAfter": {
-        "Check_evidence_scope": [
+        "Check_provider_event_freshness": [
           "Succeeded"
         ]
       }
@@ -485,7 +588,7 @@
       "actions": {
         "Check_dispatch_confirmation": {
           "type": "If",
-          "expression": "@and(equals(parameters('dispatchConfirmation'), 'INVOKE_CONFIGURED_LAB_EXECUTOR'), equals(body('Read_executor')?['properties']?['state'], 'Enabled'))",
+          "expression": "@and(equals(parameters('dispatchConfirmation'), 'INVOKE_CONFIGURED_LAB_EXECUTOR'), equals(body('Read_executor')?['properties']?['state'], 'Enabled'), greaterOrEquals(ticks(utcNow()), ticks(parameters('notBeforeUtc'))), lessOrEquals(ticks(utcNow()), ticks(parameters('notAfterUtc'))))",
           "actions": {
             "Check_dispatch_confirmation_ok": {
               "type": "Compose",
@@ -544,7 +647,14 @@
             "executorResourceId": "@parameters('executorResourceId')",
             "requestedAt": "@utcNow()",
             "dispatcherRunId": "@workflow().run.name",
-            "nextStep": "Inspect the executor run, then perform independent fixed-token capability verification."
+            "nextStep": "Inspect the executor run, then perform independent fixed-token capability verification.",
+            "notBeforeUtc": "@parameters('notBeforeUtc')",
+            "notAfterUtc": "@parameters('notAfterUtc')",
+            "ProviderEventId": "@first(body('Parse_custom_details')?['ProviderEventId'])",
+            "systemAlertId": "@first(body('Read_incident_alerts')?['value'])?['properties']?['systemAlertId']",
+            "alertAvailableAt": "@first(body('Read_incident_alerts')?['value'])?['properties']?['processingEndTime']",
+            "incidentCreatedAt": "@body('Read_incident')?['properties']?['createdTimeUtc']",
+            "ProviderEventTime": "@first(body('Parse_custom_details')?['ProviderEventTime'])"
           },
           "runAfter": {
             "Invoke_executor": [
@@ -560,7 +670,14 @@
             "inputs": {
               "status": "dispatch_preview_no_invocation",
               "incidentId": "@triggerBody()?['object']?['id']",
-              "checkedAt": "@utcNow()"
+              "checkedAt": "@utcNow()",
+              "notBeforeUtc": "@parameters('notBeforeUtc')",
+              "notAfterUtc": "@parameters('notAfterUtc')",
+              "ProviderEventId": "@first(body('Parse_custom_details')?['ProviderEventId'])",
+              "systemAlertId": "@first(body('Read_incident_alerts')?['value'])?['properties']?['systemAlertId']",
+              "alertAvailableAt": "@first(body('Read_incident_alerts')?['value'])?['properties']?['processingEndTime']",
+              "incidentCreatedAt": "@body('Read_incident')?['properties']?['createdTimeUtc']",
+              "ProviderEventTime": "@first(body('Parse_custom_details')?['ProviderEventTime'])"
             }
           }
         }

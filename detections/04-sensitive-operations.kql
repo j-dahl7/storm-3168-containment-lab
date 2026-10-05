@@ -24,6 +24,8 @@ AzureActivity
 | where tolower(ActivityStatusValue) in ("success", "succeeded")
 | where tolower(OperationNameValue) in (
     "microsoft.storage/storageaccounts/listkeys/action",
+    "microsoft.storage/storageaccounts/listaccountsas/action",
+    "microsoft.storage/storageaccounts/listservicesas/action",
     "microsoft.storage/storageaccounts/regeneratekey/action",
     "microsoft.storage/storageaccounts/delete",
     "microsoft.authorization/locks/delete")
@@ -33,6 +35,6 @@ AzureActivity
                               tolower(OperationNameValue) endswith "/regeneratekey/action", 2, 1)
 | order by SignalPriority desc, TimeGenerated asc, EventDataId asc
 | take 1
-| project TimeGenerated, ArrivalTime, ArrivalClock, EventSubmissionTimestamp, LabId = ConfiguredLabId,
+| project TimeGenerated, ProviderEventTime = format_datetime(TimeGenerated, "yyyy-MM-ddTHH:mm:ss.fffffffZ"), ArrivalTime, ArrivalClock, EventSubmissionTimestamp, LabId = ConfiguredLabId,
     ActorObjectId = ActorOid, CallerIpAddress, ResourceId, OperationNameValue,
     ActivityStatusValue, ActivitySubstatusValue, CorrelationId, OperationId, EventDataId

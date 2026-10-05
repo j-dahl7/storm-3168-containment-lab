@@ -18,6 +18,8 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from stormlab.core import ARM, GRAPH, AzureCLI, HTTP, Manifest, Response, SafetyError, guid, load_json, utc_now
 from stormlab.__main__ import private_root
+from activity_export import ActivityExport, remove_recorded_export, validate_state as validate_export_state
+from trial_state import assert_idle
 
 
 VERSIONS = {"workflow": "2019-05-01", "assignment": "2022-04-01",
@@ -56,7 +58,7 @@ def exact_role_id(value: object, prefix: str, field_name: str) -> str:
 
 def build_plan(m: Manifest, state: dict | None = None, *, include_storage: bool = False,
                include_workspace: bool = False, confirm_storage_name: str | None = None,
-               acknowledge_data_loss: bool = False) -> tuple[list[Target], dict]:
+               acknowledge_data_loss: bool = False, export_state: dict | None = None) -> tuple[list[Target], dict]:
     """Derive targets only from the manifest and exact responder state, never discovery."""
     if (include_storage or include_workspace) and not acknowledge_data_loss:
         raise SafetyError("Data-resource removal requires --acknowledge-data-loss after archiving needed evidence")
@@ -139,18 +141,71 @@ def build_plan(m: Manifest, state: dict | None = None, *, include_storage: bool 
                           + [{"action": "delete_and_verify_absent", "kind": t.kind, "id": t.id} for t in targets],
             "retained": retained, "skipped": skipped,
             "limitations": ["No resource-group, lock, unrecorded object or purge operations",
-                            "Optional Sentinel dispatcher, connections, rules and telemetry settings are not recorded in responder-state.json and are not discovered or removed",
+                            "Optional Sentinel dispatcher, connections and rules are not removed; Activity Log export is removed only when its exact separate receipt exists",
                             "Only the recorded custom responder role is removed; built-in roles are never deleted",
                             "Cleanup does not prove revocation of previously issued credentials"],
             "results": []}
+    if export_state is not None:
+        validate_export_state(m, export_state)
+        plan["operations"].insert(0, {"action": "remove_recorded_activity_export", "kind": "activity_export", "id": export_state["setting_id"]})
+    plan["limitations"].append("Read-only leftovers inventory reports unrecorded resources/grants and exact soft-deleted identities; it never adds deletion targets and may be incomplete if reads fail")
     return targets, plan
 
 
 class Cleanup:
     def __init__(self, m: Manifest, targets: list[Target], http: HTTP, operator: AzureCLI,
-                 *, sleeper: Callable = time.sleep, persist: Callable | None = None):
+                 *, sleeper: Callable = time.sleep, persist: Callable | None = None,
+                 manifest_data: dict | None = None, export_state: dict | None = None, export_persist: Callable | None = None):
         self.m, self.targets, self.http, self.operator = m, tuple(targets), http, operator
         self.sleeper, self.persist = sleeper, persist or (lambda _: None)
+        self.manifest_data, self.export_state = manifest_data, export_state
+        self.export_persist = export_persist or (lambda _: None)
+
+    def lock_inventory(self) -> dict:
+        result = {}
+        for scope in (self.m.rg_id, self.m.storage_id):
+            response = self.call("arm", "GET", scope + "/providers/Microsoft.Authorization/locks?api-version=2016-09-01")
+            value = self.object_or_absent(response)
+            if value is None and scope == self.m.storage_id:
+                absent = self.object_or_absent(self.call("arm", "GET", scope + "?api-version=2023-05-01"))
+                if absent is None:
+                    result[scope] = []
+                    continue
+            if value is None or not isinstance(value.get("value"), list) or value.get("nextLink"):
+                raise SafetyError("Cannot establish resource-group/storage lock inventory; no cleanup writes")
+            result[scope] = [{"id": x.get("id"), "level": x.get("properties", {}).get("level")} for x in value["value"]]
+            if value["value"]:
+                raise SafetyError("Resource-group or storage locks are present; cleanup never removes them")
+        return result
+
+    def leftovers(self) -> dict:
+        """Read-only reporting. Discovery never expands the deletion allowlist."""
+        result = {"complete": True, "unrecorded_resources": [], "unrecorded_identity_assignments": [], "soft_deleted_identities": []}
+        allowed = {x.id.lower() for x in self.targets} | {self.m.storage_id.lower(), (self.m.rg_id + "/providers/Microsoft.OperationalInsights/workspaces/" + self.m.workspace_name).lower()}
+        principals = {(self.m.actor or {}).get("service_principal_object_id"), (self.m.group or {}).get("object_id")}
+        principals.update(t.metadata.get("principal_id") for t in self.targets if t.kind == "responder_assignment")
+        for name, path in (("unrecorded_resources", self.m.rg_id + "/resources?api-version=2021-04-01"),
+                           ("unrecorded_identity_assignments", self.m.rg_id + "/providers/Microsoft.Authorization/roleAssignments?api-version=2022-04-01&$filter=atScope()")):
+            try:
+                value = self.object_or_absent(self.call("arm", "GET", path))
+                if value is None or not isinstance(value.get("value"), list) or value.get("nextLink"):
+                    raise SafetyError("Incomplete inventory")
+                result[name] = [{"id": x.get("id"), "type": x.get("type")} for x in value["value"]
+                                if str(x.get("id", "")).lower() not in allowed
+                                and (name == "unrecorded_resources" or x.get("properties", {}).get("principalId") in principals)]
+            except Exception:
+                result["complete"] = False
+                result[name + "_status"] = "unknown_read_failed_or_paginated"
+        for t in self.targets:
+            if t.kind not in {"application", "service_principal"}:
+                continue
+            try:
+                value = self.object_or_absent(self.call("graph", "GET", "/v1.0/directory/deletedItems/" + t.id))
+                result["soft_deleted_identities"].append({"id": t.id, "kind": t.kind, "status": "present_retained_no_purge" if value else "not_found"})
+            except Exception:
+                result["complete"] = False
+                result["soft_deleted_identities"].append({"id": t.id, "kind": t.kind, "status": "unknown"})
+        return result
 
     def call(self, service: str, method: str, path: str) -> Response:
         if service not in {"arm", "graph"} or method != "GET":
@@ -291,12 +346,22 @@ class Cleanup:
         self.persist(plan)
         try:
             self.ownership()
+            plan["locks_checked"] = self.lock_inventory()
             # Check every candidate before the first write. Repeat fresh checks
             # immediately before each mutation to detect mid-run ownership drift.
             for target in self.targets:
                 self.read_target(target)
+            if self.export_state is not None:
+                if self.manifest_data is None:
+                    raise SafetyError("Recorded export cleanup needs the selected original manifest")
+                ActivityExport(self.manifest_data, self.http, self.operator).read_setting(self.export_state)
             plan["live_validation"] = "passed"
             plan["status"] = "in_progress"
+            if self.export_state is not None:
+                result = remove_recorded_export(self.manifest_data, self.export_state, self.http, self.operator,
+                    confirm_lab_id=self.m.lab_id, persist=self.export_persist)
+                plan["results"].append({"action": "remove_recorded_activity_export", "id": self.export_state["setting_id"], **result})
+                self.persist(plan)
             for target in self.targets:
                 if target.kind != "workflow":
                     continue
@@ -323,8 +388,9 @@ class Cleanup:
                 plan.pop("pending", None)
                 plan["results"].append({"action": "delete", "kind": target.kind, "id": target.id, "status": status, "observed_at": utc_now()})
                 self.persist(plan)
+            plan["leftovers"] = self.leftovers()
             plan["status"] = "completed_with_retained_resources"
-        except (SafetyError, ValueError, KeyError, TypeError) as exc:
+        except BaseException as exc:
             plan["status"] = "stopped_reconciliation_required"
             # Error strings contain only static diagnostic text/status codes.
             plan["error"] = str(exc) if isinstance(exc, SafetyError) else "Unexpected provider metadata; reconcile before retrying"
@@ -369,15 +435,24 @@ def main() -> int:
     if args.execute and (not args.subscription or not args.confirm_lab_id):
         parser.error("--execute requires --subscription and --confirm-lab-id")
     m, state, private = load_inputs(args.manifest)
+    data = load_json(args.manifest)
+    export_path = private / "activity-export-state.json"
+    if export_path.resolve() != export_path:
+        raise SafetyError("Activity export receipt must be a regular same-checkout private path")
+    export_state = load_json(export_path) if export_path.exists() else None
     if args.subscription and guid(args.subscription, "selected subscription") != m.subscription_id:
         raise SafetyError("Selected subscription differs from the manifest")
     if args.confirm_lab_id and guid(args.confirm_lab_id, "lab confirmation") != m.lab_id:
         raise SafetyError("Lab confirmation differs from the manifest")
     targets, plan = build_plan(m, state, include_storage=args.include_storage, include_workspace=args.include_workspace,
-                               confirm_storage_name=args.confirm_storage_name, acknowledge_data_loss=args.acknowledge_data_loss)
+                               confirm_storage_name=args.confirm_storage_name, acknowledge_data_loss=args.acknowledge_data_loss,
+                               export_state=export_state)
     if args.execute:
+        assert_idle(data, check_settling=False)
         report_path = private / "cleanup-state.json"
-        cleanup = Cleanup(m, targets, HTTP(), AzureCLI(m, args.subscription), persist=lambda value: write_report(report_path, value))
+        cleanup = Cleanup(m, targets, HTTP(), AzureCLI(m, args.subscription), persist=lambda value: write_report(report_path, value),
+                          manifest_data=data, export_state=export_state,
+                          export_persist=lambda value: write_report(export_path, value))
         cleanup.execute(plan, subscription=args.subscription, confirm_lab_id=args.confirm_lab_id)
     print(json.dumps(plan, indent=2, allow_nan=False))
     return 0

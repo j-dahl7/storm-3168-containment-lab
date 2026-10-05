@@ -53,6 +53,7 @@ class Cloud:
         self.rg = {"id": m.rg_id, "tags": {"storm3168LabId": m.lab_id}}
         self.lock = None
         self.runs = {"value": []}
+        self.locks = {"value": []}
         self.objects = {}
         self.reject_delete = None
         self.keep_deleted = False
@@ -94,6 +95,10 @@ class Cloud:
             return response(404) if self.lock is None else response(data=self.lock)
         if "/runs?" in url:
             return response(data=self.runs)
+        if "/Microsoft.Authorization/locks?" in url:
+            return response(data=self.locks)
+        if "/resources?" in url or "/Microsoft.Authorization/roleAssignments?" in url:
+            return response(data={"value": []})
         if method == "GET":
             item = self.objects.get(url)
             return response(404) if item is None else response(data=item)
@@ -202,6 +207,38 @@ class CleanupTests(unittest.TestCase):
     def test_lock_is_never_removed_and_blocks_cleanup(self):
         self.cloud.lock = {"id": self.m.lock_id, "properties": {"notes": "storm3168LabId=" + LAB}}
         self.assert_stops_before_write("lock-remove")
+
+    def test_unrecorded_rg_lock_blocks_before_any_write(self):
+        self.cloud.locks = {"value": [{"id": self.m.rg_id + "/providers/Microsoft.Authorization/locks/foreign", "properties": {"level": "CanNotDelete"}}]}
+        self.assert_stops_before_write("locks are present")
+
+    def test_leftovers_are_reported_but_never_added_as_targets(self):
+        extra = self.m.rg_id + "/providers/Microsoft.Storage/storageAccounts/unrecorded"
+        original = self.cloud.request
+        def request(method, url, *args):
+            if "/resources?" in url:
+                return response(data={"value": [{"id": extra, "type": "Microsoft.Storage/storageAccounts"}]})
+            return original(method, url, *args)
+        with patch.object(self.cloud, "request", side_effect=request):
+            result = self.execute()
+        self.assertEqual(result["leftovers"]["unrecorded_resources"][0]["id"], extra)
+        self.assertFalse(any(extra in url for _, url in self.cloud.writes))
+
+    def test_recorded_export_is_integrated_before_resource_deletion(self):
+        import activity_export as ae
+        export_uuid = "12345678-1234-4234-8234-123456789012"
+        state = {"lab_id": LAB, "subscription_id": SUB, "export_uuid": export_uuid,
+                 "workspace_id": ae.workspace_id(self.m), "setting_id": ae.setting_id(self.m, export_uuid)}
+        targets, plan = cleanup.build_plan(self.m, self.state, export_state=state)
+        self.assertEqual(plan["operations"][0]["id"], state["setting_id"])
+        data = json.loads((ROOT / "config/manifest.example.json").read_text())
+        worker = cleanup.Cleanup(self.m, targets, self.cloud, Operator(), sleeper=lambda _: None,
+                                 manifest_data=data, export_state=state)
+        with patch.object(cleanup.ActivityExport, "read_setting", return_value={}), patch.object(cleanup, "remove_recorded_export", return_value={"status": "absent_verified"}) as remove:
+            result = worker.execute(plan, subscription=SUB, confirm_lab_id=LAB)
+        remove.assert_called_once()
+        self.assertEqual(remove.call_args.args[1]["setting_id"], state["setting_id"])
+        self.assertEqual(result["results"][0]["action"], "remove_recorded_activity_export")
 
     def test_exact_actor_name_required_not_prefix(self):
         self.obj("application")["displayName"] += "-production"

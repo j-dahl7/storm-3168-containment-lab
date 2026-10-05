@@ -32,13 +32,13 @@ AzureActivity does not reliably record GET enumeration and cannot establish Blob
 
 Explicit parameters: workspaceName, labResourceGroupId, actorObjectId, labId and ruleId; enableRule defaults false. The ARM deployment's target group must contain the existing Sentinel workspace; the monitored lab group may differ. This template creates only one workspace-scoped scheduled analytic rule. It does not onboard Sentinel, create a connector, enable a playbook or grant any role.
 
-The optional separately deployed dispatcher contract uses the exact custom-detail keys ActorObjectId, LabId, ResourceId and ProviderEventId. LabId is the explicit configured lab UUID, not a tag inferred from an event. The dispatcher must fetch current incident/alert state and independently validate rule identity, singleton values and server-side ownership; a user-editable incident field is not authorization by itself.
+The optional dispatcher contract uses ActorObjectId, LabId, ResourceId, ProviderEventId and ProviderEventTime. ProviderEventTime is the source TimeGenerated formatted as UTC, allowing delayed events from an older trial to be rejected even when they create a new incident. LabId is the configured lab UUID. The dispatcher refetches server evidence and verifies the exact rule, singleton details, ownership and bounded trial window; incident text is not authorization. The candidate list includes ListKeys, listAccountSas and listServiceSas as well as key regeneration and destructive operations.
 
 The query embedded in the template is generated from 04-sensitive-operations.kql with the fictional literals replaced by ARM parameters. Preserve synchronization when editing. Stable API 2025-09-01 is used. The rule maps ResourceId and source IP, and keeps ActorObjectId in custom details; it does not pretend the service principal is a human Account.
 
 A lab UUID-derived explicit rule ID avoids display-name adoption. Inspect any existing rule with the same ID before deployment; ARM upserts are not an ownership guard. Follow root setup/preflight instructions. Enabling a rule is a separate action and causes alert/incident writes and possible ingestion costs. Test read-only KQL first.
 
-The local replay validates predicates only; synthetic records must never be injected into AzureActivity or AADServicePrincipalSignInLogs. Their schema pages do not support the ingestion API. A custom replay table would need its own explicit schema and is not created here.
+`scripts/render_kql_replay.py` generates the replay from the complete deployed query body, substituting only the datatable and fixed clock. Each fixture is evaluated through that actual pipeline, followed by a full-batch candidate-selection check. The URI-form objectidentifier claim is used for the normal ARM cases, with explicit short-oid and Caller fallback cases. Local generation/synchronization is not Kusto parsing or execution; the newly generated replay still needs service acceptance after review. Never inject synthetic records into AzureActivity or AADServicePrincipalSignInLogs.
 
 ## Alert and incident timing evidence
 

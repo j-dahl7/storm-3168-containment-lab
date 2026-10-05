@@ -154,8 +154,12 @@ verify `AzureActivity` rows using `scripts/telemetry.py` before enabling an anal
 Use `--operation status --execute` with the same subscription/lab confirmations
 for an exact readback. For removal, use `--operation remove --execute` with those
 confirmations. Removal validates the recorded setting's ID, destination and sole
-Administrative category, then requires 404. Remove this export **before** deleting
-its workspace; cleanup does not enumerate or remove it. Do not delete the private
+Administrative category, then requires 404. Prefer removing the export before
+deleting its workspace. Exact recorded removal also works after the destination
+is gone: it checks the lab resource group's live tag and the setting's exact
+destination/category, without adopting another workspace. Cleanup can use
+`remove_recorded_export` with that same private state; it never enumerates exports.
+Do not delete the private
 record while the outcome is unknown. All other subscription exports stay outside
 this helper's allowlist. The internal Bicep module must not be deployed directly;
 the helper also checks the workspace tag, which cannot be used as an early Bicep

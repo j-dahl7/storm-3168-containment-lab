@@ -25,17 +25,21 @@ Return: severity; file/line; reproducible trigger; observed or source-derived co
 - [ ] The 66-case extended catalog is optional; it is not the initial execution workload.
 - [ ] Every Blob/key/SAS trial proves successful actor access before response; closed-firewall or Shared-Key-disabled baseline failures are not revocation.
 - [ ] Storage preparation requires an explicit single source IP, separate Shared Key opt-in and a nonce/checksum canary; no broad allow rule is created.
-- [ ] Preparation's finally restoration and manual receipt-based recovery are reviewed; an interrupted process can leave configuration to reconcile.
+- [ ] Preparation's bounded restoration retries and manual receipt-based recovery are reviewed; an interrupted process can leave configuration to reconcile. Missing readback is unknown, not restored.
 - [ ] Blob trial hold covers baseline, action, full observation and cleanup margin; the 600-second default is not used for a lifetime trial. The explicit hold is at most 7800 seconds and never extended automatically.
-- [ ] RBAC/group defaults use 900 seconds; 300-second observations are short/censored. CORE05/CORE06/CORE12 lifetime claims require explicit until-token-expiry and disclose any 7200-second cap.
+- [ ] RBAC/group defaults use 900 seconds; token-bound trials default to recorded expiry plus margin with a 7200-second cap. Short or capped observations explicitly disclose their limit; expiry-run probes use the declared interval.
 - [ ] Operator seed success is not equated with actor data authorization; no helper silently grants roles.
 - [ ] Core/extended actions remain unrun until required review and execution authorization; source-only lock layout checks are not live results.
 
 - [ ] At least three independent trials per action, fresh valid baseline each time.
 - [ ] Group role removal and member removal are separate.
+- [ ] Writer removal refuses `arm-read` and the retained Reader assignment; the read grant is a control.
 - [ ] Token issuance, cached ARM access, Blob OAuth access and copied-key access are separate.
 - [ ] Expiry, throttling, transport failures and policy/network denials are not conflated.
 - [ ] Time intervals and censored observations are reported honestly.
+- [ ] Neutral error samples preserve qualified denial evidence without proving continuous denial or extending the last confirmed-denial timestamp; gaps remain visible.
+- [ ] A transient operator read preserves an inconclusive sample and partial-run linkage; ownership drift still stops the trial.
+- [ ] Credential-cleanup interruption saves the private receipt before being re-raised. Process termination or power loss still requires manual reconciliation.
 - [ ] No invented min/median/max or conversion of NOT TESTED into success.
 - [ ] Trial setup, code revision, credential class, exact capability and regional context preserved.
 - [ ] Cleanup or rollback is separately verified.
@@ -48,6 +52,9 @@ Return: severity; file/line; reproducible trigger; observed or source-derived co
 - [ ] AzureActivity actor uses object-ID claims/Caller, not an AppId-to-object-ID substitution.
 - [ ] Exact RG resource path boundary excludes similarly prefixed sibling groups.
 - [ ] Native template stays disabled unless explicitly changed; no auto-binding.
+- [ ] Incident creation, update and alert evidence are bounded by the explicit trial start, and stale queued work cannot silently become a new experiment.
+- [ ] Workflow shutdown retries only the exact same-invocation proven target; age cannot block stopping it, and successful identity drift refuses it. Cancellation and deletion still require normal ownership checks.
+- [ ] Exact recorded incident/run cleanup is separate from disabling the workflow; failures remain visible.
 - [ ] Terminal provider events retain outcome and EventDataId; multiple pipeline records not counted as multiple attacker requests.
 - [ ] Late ingestion, fallback clocks, duplicate alerts and missing-table behavior documented.
 - [ ] Service-principal entity is not falsely mapped as a human user.

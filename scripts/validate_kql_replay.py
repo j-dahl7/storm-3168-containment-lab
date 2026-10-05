@@ -5,6 +5,7 @@ import hashlib
 import json
 from lab_support import ROOT, az, guid, private_path, save
 from telemetry import load_manifest, resolve_workspace, result_rows, workspace_id
+from render_kql_replay import build as build_actual_replay
 
 
 def main():
@@ -16,15 +17,18 @@ def main():
     output = private_path(args.output)
     if output.exists():
         raise RuntimeError("Refusing to overwrite evidence")
-    data, model = load_manifest(args.manifest, args.subscription)
-    workspace = resolve_workspace(data, model, workspace_id(model), owned=True)
     query_file = ROOT / "detections" / "replay-sensitive-operations.kql"
     query = query_file.read_text(encoding="utf-8")
+    if query != build_actual_replay():
+        raise RuntimeError("Synthetic replay is stale; regenerate from the actual deployed query before any cloud call")
+    data, model = load_manifest(args.manifest, args.subscription)
+    workspace = resolve_workspace(data, model, workspace_id(model), owned=True)
     rows = result_rows(az("monitor", "log-analytics", "query", "--subscription", args.subscription,
                           "--workspace", workspace["customer_id"], "--analytics-query", query,
                           "--timespan", "2026-10-01T00:00:00Z/2026-10-02T00:00:00Z"))
     fixture = json.loads((ROOT / "fixtures" / "azureactivity.synthetic.json").read_text(encoding="utf-8"))
     expected_ids = {event["CaseId"] for event in fixture["events"]}
+    expected_ids.add("__full_pipeline_selection__")
     passed = len(rows) == len(expected_ids) and {row.get("CaseId") for row in rows} == expected_ids and all(row.get("MatchesExpectation") in (True, "true", "True", 1) for row in rows)
     result = {"schema_version": 1, "evidence_type": "service_executed_synthetic_query", "synthetic": True,
               "provider_event_ingestion_tested": False, "containment_tested": False,

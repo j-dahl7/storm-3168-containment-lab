@@ -16,7 +16,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from email.utils import formatdate
 from pathlib import Path
@@ -34,6 +34,13 @@ MIN_INTERVAL = 5
 
 class SafetyError(Exception):
     """A missing proof or an unsafe request; messages contain no credentials."""
+
+
+class TransientReadError(SafetyError):
+    """A temporary operator GET failure; never permission to perform a mutation."""
+    def __init__(self, status: int):
+        self.status = status
+        super().__init__("Operator metadata read is temporarily inconclusive")
 
 
 def utc_now() -> str:
@@ -225,7 +232,7 @@ SAS_KEYS = {"sv", "ss", "srt", "sp", "se", "st", "spr", "sip", "sig", "sr", "si"
 
 def validate_sas(query: str, manifest: Manifest, now: float, *, allow_expired: bool = False) -> dict:
     """Validate an externally supplied frozen read-only SAS without re-signing it."""
-    if not isinstance(query, str) or not 1 <= len(query) <= 4096 or any(c in query for c in "?#\r\n") or "://" in query or re.search(r"%(?![A-Fa-f0-9]{2})", query):
+    if not isinstance(query, str) or not 1 <= len(query) <= 4096 or any(not 33 <= ord(c) <= 126 for c in query) or any(c in query for c in "?#") or "://" in query or re.search(r"%(?![A-Fa-f0-9]{2})", query):
         raise SafetyError("SAS must be a bounded query string only, without URL or fragment")
     try:
         pairs = urllib.parse.parse_qsl(query, keep_blank_values=True, strict_parsing=True, max_num_fields=32, errors="strict")
@@ -234,7 +241,9 @@ def validate_sas(query: str, manifest: Manifest, now: float, *, allow_expired: b
         raise SafetyError("Malformed SAS query") from None
     fields: dict[str, str] = {}
     for key, value in pairs:
-        if key not in SAS_KEYS or key in fields or not value or any(ord(c) < 32 for c in value):
+        if key in {"sduoid", "skdutid", "srh", "srq"}:
+            raise SafetyError("User-bound or request-bound SAS requires an additional credential/header contract and is unsupported")
+        if key not in SAS_KEYS or key in fields or not value or any(not 33 <= ord(c) <= 126 for c in value):
             raise SafetyError("Unknown, duplicate, empty, or unsafe SAS field")
         fields[key] = value
     if fields.get("sp") != "r" or fields.get("spr") != "https" or not {"sig", "se", "sv"} <= fields.keys():
@@ -248,10 +257,10 @@ def validate_sas(query: str, manifest: Manifest, now: float, *, allow_expired: b
         raise SafetyError("Invalid SAS signature encoding") from None
     def utc_time(key: str) -> float:
         value = fields[key]
-        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,7})?(?:Z|\+00:00)", value):
+        if not re.fullmatch(r"\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,7})?)?(?:Z|\+00:00))?", value):
             raise SafetyError("SAS timestamps must explicitly use UTC")
         try:
-            return datetime.fromisoformat(value.replace("Z", "+00:00")).timestamp()
+            return datetime.fromisoformat(value.replace("Z", "+00:00")).replace(tzinfo=timezone.utc).timestamp()
         except ValueError:
             raise SafetyError("Invalid SAS UTC timestamp") from None
     expiry = utc_time("se")
@@ -270,10 +279,12 @@ def validate_sas(query: str, manifest: Manifest, now: float, *, allow_expired: b
     elif {"saoid", "suoid", "scid"} & fields.keys():
         raise SafetyError("Delegation fields require a user-delegation SAS")
     if "ss" in fields or "srt" in fields:
-        if delegated or "sr" in fields or fields.get("ss") != "b" or "o" not in fields.get("srt", "") or any(c not in "sco" for c in fields["srt"]) or len(set(fields["srt"])) != len(fields["srt"]):
+        if delegated or "sr" in fields or "si" in fields or fields.get("ss") != "b" or "o" not in fields.get("srt", "") or any(c not in "sco" for c in fields["srt"]) or len(set(fields["srt"])) != len(fields["srt"]):
             raise SafetyError("Account SAS must allow blob objects only in the fixed target path")
     elif fields.get("sr") not in {"b", "c", "d"}:
         raise SafetyError("Service SAS must name a supported blob resource type")
+    if delegated and "si" in fields:
+        raise SafetyError("User-delegation SAS cannot use a stored access policy")
     if expiry <= start:
         raise SafetyError("SAS validity window is empty")
     if start > now:
@@ -286,8 +297,8 @@ def validate_sas(query: str, manifest: Manifest, now: float, *, allow_expired: b
 @dataclass
 class Response:
     status: int
-    body: bytes = b""
-    headers: dict[str, str] | None = None
+    body: bytes = field(default=b"", repr=False)
+    headers: dict[str, str] | None = field(default=None, repr=False)
     transport_error: bool = False
 
     def data(self) -> dict:
@@ -379,13 +390,17 @@ class AzureCLI:
         try:
             result = self.runner([*prefix, *args, "--only-show-errors", "--output", "json"], capture_output=True, text=True, timeout=45, check=False, shell=False)
             if result.returncode:
+                if any(marker in str(getattr(result, "stderr", "")) for marker in ("ConnectionResetError", "Connection aborted", "Connection reset", "Read timed out")):
+                    raise TransientReadError(0)
                 raise SafetyError("Azure CLI operator authentication failed")
             data = json.loads(result.stdout)
             if not isinstance(data, dict):
                 raise SafetyError("Unexpected Azure CLI response")
             return data
-        except (OSError, ValueError, subprocess.TimeoutExpired) as exc:
-            raise SafetyError("Cannot read Azure CLI operator credentials") from exc
+        except (OSError, subprocess.TimeoutExpired):
+            raise TransientReadError(0) from None
+        except ValueError:
+            raise SafetyError("Cannot read Azure CLI operator credentials") from None
 
     def token(self, service: str) -> str:
         m = self.manifest
@@ -443,6 +458,8 @@ def classify(response: Response, expired: bool = False, *, auth: str | None = No
         return "authorization_unattributed"
     if response.status in {401, 403} and code == "AuthenticationFailed" and auth in {"shared-key", "sas"}:
         return "credential_rejected"
+    if response.status == 401 and code == "InvalidAuthenticationToken" and auth == "bearer":
+        return "credential_rejected"
     if response.status == 403 and code in {"AuthorizationFailed", "AuthorizationPermissionMismatch", "KeyBasedAuthenticationNotPermitted"}:
         return "authorization_denied"
     if response.status in {401, 403}:
@@ -475,6 +492,8 @@ class Guard:
 
     @staticmethod
     def checked(response: Response) -> dict:
+        if response.transport_error or response.status == 0 or response.status == 429 or response.status >= 500:
+            raise TransientReadError(response.status)
         if response.transport_error or response.status != 200:
             raise SafetyError(f"Ownership verification failed (HTTP {response.status})")
         return response.data()
@@ -547,6 +566,8 @@ def response_target(m: Manifest, action: str, assignment_id: str | None = None) 
         if len(rows) != 1:
             raise SafetyError("Select one exact recorded role assignment")
         row = rows[0]
+        if row["role_definition_id"].rsplit("/", 1)[-1].lower() == "acdd72a7-3385-48ef-bd42-f606fba81ae7":
+            raise SafetyError("Reader is the independent control and cannot be deleted by this harness")
         return {"role_assignment_id": row["id"], "principal_id": row["principal_id"], "scope": row["scope"],
                 "role_definition_id": row["role_definition_id"],
                 "access_path": "direct_role_assignment" if m.actor and row["principal_id"] == m.actor["service_principal_object_id"] else "group_role_assignment"}
@@ -648,9 +669,13 @@ def respond(guard: Guard, action: str, *, execute: bool = False, confirm_lab_id:
     if not execute:
         return result
     response = guard.mutation(service, method, path, body, validator)
-    result.update(http_status=response.status, service_code=service_code(response), status="accepted_unverified" if not response.transport_error and 200 <= response.status < 300 else "failed", outcome=classify(response))
+    uncertain = response.transport_error or response.status == 0 or response.status >= 500
+    acknowledged = not response.transport_error and 200 <= response.status < 300
+    result.update(http_status=response.status, service_code=service_code(response),
+                  status="indeterminate" if uncertain else "accepted_unverified" if acknowledged else "failed",
+                  mutation_acknowledged=acknowledged, outcome=classify(response))
     result.update(request_started_at=guard.last_mutation_started, acknowledged_at=guard.last_mutation_acknowledged)
-    if not response.transport_error and 200 <= response.status < 300 and not action.startswith("rotate-key"):
+    if not action.startswith("rotate-key"):
         verification_path = path
         if action == "sp-disable":
             verification_path += "?$select=id,accountEnabled"
@@ -660,7 +685,13 @@ def respond(guard: Guard, action: str, *, execute: bool = False, confirm_lab_id:
             verification_path = f"/v1.0/applications/{a['application_object_id']}?$select=id,passwordCredentials"
         elif action == "group-member-remove":
             verification_path = path.removesuffix("/$ref")
-        verified = guard.read(service, verification_path)
+        try:
+            verified = guard.read(service, verification_path)
+        except Exception:
+            # Keep the mutation receipt even if operator auth/readback fails.
+            verified = Response(0, transport_error=True)
+        result["postcondition_http_status"] = verified.status
+        result["postcondition_readback"] = "unavailable" if verified.transport_error or verified.status == 0 or verified.status == 429 or verified.status >= 500 else "observed"
         confirmed = False
         if method == "DELETE":
             confirmed = verified.status == 404 and not verified.transport_error
@@ -741,8 +772,13 @@ def probe_once(m: Manifest, http: HTTP, guard: Guard, capability: str, credentia
         elif capability == "arm-tag-write":
             if not allow_mutation:
                 raise SafetyError("Tag-write probe requires --allow-mutation")
-            guard.ownership()
-            guard.actor()
+            try:
+                guard.ownership()
+                guard.actor()
+            except TransientReadError as exc:
+                return {**result, "http_status": exc.status, "service_code": "", "outcome": "guard_read_inconclusive",
+                        "probe_stage": "operator_guard", "mutation_attempted": False,
+                        "guard_read_transport_retries": guard.read_transport_retries - retry_start}
             # Storage Account Contributor permits storageAccounts/write, not the
             # generic Microsoft.Resources/tags API. This read/merge/write is not
             # atomic: serialize canary writers on the dedicated lab account.
@@ -788,41 +824,64 @@ def probe_once(m: Manifest, http: HTTP, guard: Guard, capability: str, credentia
     return result
 
 
-def run_probe(m: Manifest, http: HTTP, guard: Guard, capability: str, credential: str, *, interval: float = 20, duration: float = 180, auth: str = "bearer", allow_mutation: bool = False, credential_label: str | None = None, emit: Callable[[dict], None], clock: Callable[[], float] = time.time, sleep: Callable[[float], None] = time.sleep) -> None:
+def run_probe(m: Manifest, http: HTTP, guard: Guard, capability: str, credential: str, *, interval: float = 20, duration: float = 180, auth: str = "bearer", allow_mutation: bool = False, credential_label: str | None = None, emit: Callable[[dict], None], clock: Callable[[], float] = time.time, sleep: Callable[[float], None] = time.sleep, monotonic: Callable[[], float] | None = None) -> None:
     if not MIN_INTERVAL <= interval <= 300 or not 0 <= duration <= MAX_DURATION:
         raise SafetyError("Probe interval must be 5–300 seconds; duration must be 0–7200 seconds")
     if capability == "arm-tag-write" and not allow_mutation:
         raise SafetyError("Tag-write requires --allow-mutation")
-    start = clock()
+    wall_start = clock()
     if capability not in CAPABILITIES or auth not in {"bearer", "shared-key", "sas"}:
         raise SafetyError("Unsupported probe")
-    c = validate_actor_token(credential, m, "storage" if capability == "blob-read" else "arm", start, allow_expired=True) if auth == "bearer" else None
+    c = validate_actor_token(credential, m, "storage" if capability == "blob-read" else "arm", wall_start, allow_expired=True) if auth == "bearer" else None
     if auth == "shared-key":
         if capability != "blob-read":
             raise SafetyError("Shared Key can only probe blob-read")
-        signed_blob_headers(m.storage_account, "/", credential, start)
+        signed_blob_headers(m.storage_account, "/", credential, wall_start)
     elif auth == "sas":
         if capability != "blob-read":
             raise SafetyError("SAS can only probe the exact blob-read canary")
-        c = validate_sas(credential, m, start, allow_expired=True)
-    if not c or c["exp"] > start:
-        guard.ownership()
-        # Identity receipt is checked once before read probes, and per mutation.
-        guard.actor()
+        c = validate_sas(credential, m, wall_start, allow_expired=True)
+    # Custom clocks remain usable by offline callers; production uses monotonic
+    # targets independent of wall-clock adjustments and request latency.
+    monotonic = monotonic or (time.monotonic if clock is time.time else clock)
+    start = monotonic()
     label, run_id = guid(credential_label, "credential_label") if credential_label is not None else str(uuid.uuid4()), str(uuid.uuid4())
-    emit({"schema_version": 1, "kind": "run_start", "timestamp": utc_now(), "run_id": run_id, "credential_label": label, "capability": capability, "auth": auth, "duration_seconds": duration, "interval_seconds": interval, "token_metadata": {k: c.get(k) for k in ("aud", "iat", "exp")} if c else {}})
+    emit({"schema_version": 1, "kind": "run_start", "timestamp": utc_now(), "run_id": run_id, "credential_label": label, "capability": capability, "auth": auth, "duration_seconds": duration, "interval_seconds": interval, "scheduler": "monotonic_targets", "token_metadata": {k: c.get(k) for k in ("aud", "iat", "exp")} if c else {}})
     limit = int(duration // interval) + 1
-    for n in range(limit):
-        now = clock()
-        if n and now > start + duration:
-            break
-        row = probe_once(m, http, guard, capability, credential, auth=auth, credential_claims=c, allow_mutation=allow_mutation, now=now)
-        row.update(run_id=run_id, credential_label=label, elapsed_seconds=round(now - start, 3), sequence=n)
-        emit(row)
-        if row["outcome"] == "expired" or n + 1 == limit:
-            break
-        sleep(min(interval, max(0, start + duration - clock())))
-    emit({"schema_version": 1, "kind": "run_end", "timestamp": utc_now(), "run_id": run_id, "status": "completed", "claim": "Observed capability only; no blanket containment claim"})
+    initial_verified = False
+    status = "failed_or_incomplete"
+    try:
+        for n in range(limit):
+            target = start + n * interval
+            sleep(max(0, target - monotonic()))
+            elapsed = monotonic() - start
+            if n and elapsed > duration + 1:
+                break
+            # A backwards wall-clock adjustment must not extend token validity.
+            now = max(clock(), wall_start + elapsed)
+            if n and elapsed - n * interval >= interval:
+                row = {"schema_version": 1, "kind": "probe", "timestamp": utc_now(), "capability": capability, "auth": auth,
+                       "outcome": "schedule_gap", "http_status": 0, "mutation_attempted": False}
+            else:
+                try:
+                    if not initial_verified and (not c or c["exp"] > now):
+                        guard.ownership()
+                        guard.actor()
+                        initial_verified = True
+                    row = probe_once(m, http, guard, capability, credential, auth=auth, credential_claims=c, allow_mutation=allow_mutation, now=now)
+                except TransientReadError as exc:
+                    row = {"schema_version": 1, "kind": "probe", "timestamp": utc_now(), "capability": capability, "auth": auth,
+                           "outcome": "guard_read_inconclusive", "probe_stage": "operator_guard", "http_status": exc.status, "mutation_attempted": False}
+            row.update(run_id=run_id, credential_label=label, elapsed_seconds=round(elapsed, 3), scheduled_elapsed_seconds=n * interval, sequence=n)
+            emit(row)
+            if row["outcome"] == "expired":
+                break
+        status = "completed"
+    except KeyboardInterrupt:
+        status = "interrupted"
+        raise
+    finally:
+        emit({"schema_version": 1, "kind": "run_end", "timestamp": utc_now(), "run_id": run_id, "status": status, "claim": "Observed capability only; no blanket containment claim"})
 
 
 DENIAL_OUTCOMES = {"authorization_denied", "lock_denied", "credential_rejected"}
@@ -836,6 +895,12 @@ def observation_summary(probes: list[dict], *, baseline_allowed: bool = False,
     segment: dict | None = None
     previous_time: float | None = None
     baseline = baseline_allowed
+    first_denial = None
+    first_denial_had_baseline = False
+    first_post_baseline_denial = None
+    last_conclusive = None
+    gaps = []
+    prerequisite_observations = []
 
     def close(reason: str) -> None:
         nonlocal segment
@@ -853,28 +918,52 @@ def observation_summary(probes: list[dict], *, baseline_allowed: bool = False,
         previous_time = value
         outcome = str(probe.get("outcome", "unknown"))
         counts[outcome] = counts.get(outcome, 0) + 1
+        if probe.get("probe_stage") == "actor_pre_read" and probe.get("mutation_attempted") is False:
+            prerequisite_observations.append({"elapsed_seconds": value, "outcome": probe.get("pre_read_outcome", "unknown"), "tested_write_attempted": False})
+        if outcome in DENIAL_OUTCOMES:
+            if first_denial is None:
+                first_denial = value
+                first_denial_had_baseline = baseline
+            if baseline and first_post_baseline_denial is None:
+                first_post_baseline_denial = value
+            last_conclusive = outcome
         if outcome in DENIAL_OUTCOMES and baseline:
             if segment is not None and segment["outcome"] != outcome:
                 close("denial_type_changed")
             if segment is None:
                 segment = {"outcome": outcome, "first_observed_seconds": value, "last_observed_seconds": value,
-                           "last_allowed_seconds": last_allowed, "sample_count": 0}
+                           "last_allowed_seconds": last_allowed, "sample_count": 0, "inconclusive_samples": 0}
             segment["last_observed_seconds"] = value
             segment["sample_count"] += 1
-        else:
-            close("access_returned" if outcome == "allowed" else "credential_expired" if outcome == "expired" else "observation_gap")
+        elif outcome in {"allowed", "expired"}:
+            close("access_returned" if outcome == "allowed" else "credential_expired")
+        elif segment is not None:
+            # Unknown observations neither advance nor reset a denial series.
+            segment["inconclusive_samples"] += 1
+        if outcome not in DENIAL_OUTCOMES | {"allowed", "expired"}:
+            gaps.append({"elapsed_seconds": value, "outcome": outcome})
         if outcome == "allowed":
             baseline, last_allowed = True, value
-    close("observation_window_ended")
+            last_conclusive = outcome
+    final = str(probes[-1].get("outcome", "unknown")) if probes else "not_tested"
+    close("observation_window_ended" if final in DENIAL_OUTCOMES else "observation_gap")
     sustained = [item for item in intervals if item["sustained"]]
     final = str(probes[-1].get("outcome", "unknown")) if probes else "not_tested"
     end_reason = "credential_expired" if final == "expired" else "observation_window_ended" if final == "allowed" or final in DENIAL_OUTCOMES else "observation_gap" if probes else "not_tested"
     return {"outcomes": counts, "baseline_allowed_observed": baseline, "denial_intervals": intervals,
             "sustained_denial_observed": bool(sustained),
             "first_sustained_denial_elapsed_seconds": sustained[0]["first_observed_seconds"] if sustained else None,
+            "first_denial_elapsed_seconds": first_denial, "last_allowed_elapsed_seconds": last_allowed,
+            "first_post_baseline_denial_elapsed_seconds": first_post_baseline_denial,
+            "observation_gaps": gaps, "continuous_observation": not bool(gaps),
+            "prerequisite_observations": prerequisite_observations,
+            "prerequisite_credential_rejection_observed": any(row["outcome"] == "credential_rejected" for row in prerequisite_observations),
+            "denial_observed_without_successful_baseline": first_denial is not None and not first_denial_had_baseline,
+            "onset_classification": "observed_after_baseline" if first_denial is not None and first_denial_had_baseline else "already_denied_without_baseline" if first_denial is not None else "right_censored_while_allowed" if last_conclusive == "allowed" else "inconclusive",
+            "sustained_credential_rejection_observed": any(item["sustained"] and item["outcome"] == "credential_rejected" for item in intervals),
             "sustained_denial_at_end": bool(sustained and intervals[-1]["sustained"] and intervals[-1]["end_reason"] == "observation_window_ended"),
             "last_observed_outcome": final, "observation_end_reason": end_reason,
-            "denial_onset_right_censored": not bool(intervals) and baseline,
+            "denial_onset_right_censored": first_denial is None and last_conclusive == "allowed",
             "sustained_denial_confirmation_censored": bool(intervals) and not bool(sustained),
             "action_causality": "unproven",
             "interpretation": "Observed capability only. Expiry, network policy and gaps do not prove containment; an independent healthy control and action attribution still need review."}

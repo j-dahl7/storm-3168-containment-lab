@@ -1,4 +1,4 @@
-"""Run ONE bounded, fixed-token ARM experiment against an already-created lab.
+"""Run ONE bounded, fixed-token ARM or prepared Blob experiment.
 
 Creates a short-lived credential in memory, acquires one actor token, performs
 baseline probes, applies one selected action, and probes the SAME token again.
@@ -25,6 +25,10 @@ from lab_support import ROOT, assert_context, assert_owned, az, guid, load_owned
 
 sys.path.insert(0, str(ROOT / "src"))
 from stormlab.core import Manifest, SafetyError, response_target, summarize_trial, validate_actor_token
+from trial_state import begin_trial, finish_trial
+from storage_baseline import assert_storage_window
+
+TOKEN_ACTIONS = {"sp-disable", "app-deactivate", "secret-remove"}
 
 
 def observation_window(action: str, duration: int | None, until_expiry: bool,
@@ -33,6 +37,7 @@ def observation_window(action: str, duration: int | None, until_expiry: bool,
         raise ValueError("Choose a fixed duration or --until-token-expiry, not both")
     if duration is not None and (type(duration) is not int or not 20 <= duration <= 7200):
         raise ValueError("Explicit duration must be 20..7200 seconds")
+    until_expiry = until_expiry or (duration is None and action in TOKEN_ACTIONS)
     if until_expiry:
         if expiry is None:
             return {"mode": "until_token_expiry", "maximum_seconds": 7200, "expiry_margin_seconds": 60}
@@ -54,6 +59,40 @@ def record_phase(metadata: dict, rows: list[dict], phase: str) -> None:
     if len(starts) != 1 or any(starts[0].get(key) != metadata[key] for key in ("capability", "auth", "credential_label")):
         raise RuntimeError("Probe phase does not match the frozen credential receipt")
     metadata.setdefault("probe_runs", {})[phase] = starts[0]["run_id"]
+    ends = [row for row in rows if row.get("kind") == "run_end" and row.get("run_id") == starts[0]["run_id"]]
+    metadata.setdefault("probe_phase_status", {})[phase] = ends[0].get("status", "incomplete") if len(ends) == 1 else "incomplete"
+
+
+def execute_probe_phase(arguments: list[str], env: dict[str, str], metadata: dict, run_dir: pathlib.Path, phase: str) -> list[dict]:
+    """Always retain the emitted run ID, even if the child stops mid-window."""
+    path = pathlib.Path(arguments[arguments.index("--output") + 1])
+    rows = []
+    try:
+        invoke_harness(arguments, env)
+    finally:
+        if path.exists():
+            for line in path.read_text(encoding="utf-8").splitlines():
+                if line.strip():
+                    try:
+                        rows.append(json.loads(line))
+                    except ValueError:
+                        metadata.setdefault("partial_evidence", {})[phase] = "truncated_jsonl"
+                        break
+            try:
+                record_phase(metadata, rows, phase)
+            except (RuntimeError, KeyError, TypeError):
+                metadata.setdefault("partial_evidence", {})[phase] = "phase_receipt_unverified"
+        else:
+            metadata.setdefault("partial_evidence", {})[phase] = "no_phase_receipt"
+        save(run_dir / "trial.json", metadata)
+    if metadata.get("probe_phase_status", {}).get(phase) != "completed":
+        raise RuntimeError("Probe phase did not complete; partial evidence was retained")
+    return rows
+
+
+def validate_pairing(action: str, capability: str) -> None:
+    if action in {"role-delete", "group-member-remove"} and capability == "arm-read":
+        raise SafetyError("Reader remains a healthy control; use arm-tag-write or listkeys to measure writer removal")
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -133,23 +172,30 @@ def main() -> int:
     parser.add_argument("--subscription", required=True, type=guid)
     parser.add_argument("--confirm-lab-id", required=True, type=guid)
     parser.add_argument("--action", required=True, choices=["none", "role-delete", "sp-disable", "app-deactivate", "secret-remove", "group-member-remove"])
-    parser.add_argument("--capability", choices=["arm-read", "arm-tag-write", "listkeys"], default="arm-tag-write")
+    parser.add_argument("--capability", choices=["arm-read", "arm-tag-write", "listkeys", "blob-read"], default="arm-tag-write")
+    parser.add_argument("--storage-baseline-state", help="Required for blob-read: explicit prepared storage receipt covering the entire trial")
     parser.add_argument("--duration", type=int, help="Explicit post-action observation seconds, 20..7200; overrides the action default")
     parser.add_argument("--until-token-expiry", action="store_true", help="Explicitly observe until the frozen token expires, plus 60s scheduling margin; maximum 2h")
     parser.add_argument("--baseline-seconds", type=int, default=60)
-    parser.add_argument("--interval", type=int, default=10)
+    parser.add_argument("--interval", type=int, help="Post-action interval; default 60s for expiry windows, otherwise 10s")
     parser.add_argument("--role-assignment-id")
     parser.add_argument("--check-new-token", action="store_true", help="Separate issuance control; never replaces the fixed probe token")
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args()
-    if not 20 <= args.baseline_seconds <= 120 or not 5 <= args.interval <= 60:
+    if not 20 <= args.baseline_seconds <= 120 or (args.interval is not None and not 5 <= args.interval <= 60):
         parser.error("Baseline must be 20..120 seconds; interval 5..60")
     try:
         window = observation_window(args.action, args.duration, args.until_token_expiry)
     except ValueError as exc:
         parser.error(str(exc))
+    interval = args.interval if args.interval is not None else 60 if window["mode"] == "until_token_expiry" else 10
+    validate_pairing(args.action, args.capability)
+    if args.capability == "blob-read" and not args.storage_baseline_state:
+        parser.error("blob-read requires --storage-baseline-state")
     path, manifest = load_owned(args.manifest, args.subscription, args.confirm_lab_id)
     model = Manifest.from_dict(manifest)
+    audience = "storage" if args.capability == "blob-read" else "arm"
+    token_scope = "https://storage.azure.com/.default" if audience == "storage" else "https://management.azure.com/.default"
     target = response_target(model, args.action, args.role_assignment_id)
     actor = manifest["actor"]
     app_id = guid(actor["application_object_id"])
@@ -177,6 +223,7 @@ def main() -> int:
                 "auth": "bearer", "credential_label": str(uuid.uuid4()), "action_target": target, "access_path": target["access_path"],
                 "separate_new_token_check": {"status": "not_requested", "replaces_probe_token": False},
                 "capability": args.capability, "status": "started", "started_at": datetime.now(timezone.utc).isoformat(),
+                "location": model.location, "probe_interval_seconds": interval,
                 "source_manifest": str(path.relative_to(ROOT)), "token_refresh": False, "credential_removed": False}
     source_paths = sorted((ROOT / "src").rglob("*.py")) + sorted((ROOT / "scripts").glob("*.py"))
     metadata["source_hashes"] = {str(item.relative_to(ROOT)): hashlib.sha256(item.read_bytes()).hexdigest() for item in source_paths}
@@ -187,8 +234,16 @@ def main() -> int:
     credential_id = None
     credential_attempted = False
     client_secret = ""
+    env = {}
+    frozen_token = ""
+    lease_acquired = False
     credential_name = "storm3168-trial-" + run_id
     try:
+        if args.capability == "blob-read":
+            budget = window.get("duration_seconds", 7200) + args.baseline_seconds + 300
+            metadata["storage_preparation"] = assert_storage_window(manifest, args.storage_baseline_state, time.time() + budget)
+        begin_trial(manifest, run_id)
+        lease_acquired = True
         assert_owned(manifest, args.subscription)
         credential_attempted = True
         metadata["credential_creation_attempted"] = True
@@ -212,7 +267,7 @@ def main() -> int:
             try:
                 token_response = request("POST", f"https://login.microsoftonline.com/{guid(manifest['tenant_id'])}/oauth2/v2.0/token",
                                          form={"grant_type": "client_credentials", "client_id": client_id,
-                                               "client_secret": client_secret, "scope": "https://management.azure.com/.default"})
+                                               "client_secret": client_secret, "scope": token_scope})
                 break
             except CredentialHTTPError as exc:
                 if exc.status != 401 or exc.code != "invalid_client" or 7000215 not in exc.numeric_codes or attempt == 3:
@@ -221,22 +276,23 @@ def main() -> int:
         credential.clear()
         frozen_token = token_response["access_token"]
         token_response.clear()
-        frozen_claims = validate_actor_token(frozen_token, model, "arm")
+        frozen_claims = validate_actor_token(frozen_token, model, audience)
         metadata["frozen_token_metadata"] = {key: frozen_claims.get(key) for key in ("aud", "iat", "exp")}
         env = dict(os.environ)
         env["PYTHONPATH"] = str(ROOT / "src")
         env["STORMLAB_PROBE_TOKEN"] = frozen_token
         common = ["--manifest", str(trial_path), "--subscription", args.subscription]
         probe_common = ["probe", *common, "--capability", args.capability,
-                        "--interval", str(args.interval), "--token-env", "STORMLAB_PROBE_TOKEN", "--credential-label", metadata["credential_label"]]
+                        "--token-env", "STORMLAB_PROBE_TOKEN", "--credential-label", metadata["credential_label"]]
         if args.capability == "arm-tag-write":
             probe_common.append("--allow-mutation")
-        invoke_harness([*probe_common, "--duration", str(args.baseline_seconds), "--output", str(run_dir / "baseline.jsonl")], env)
+        baseline = execute_probe_phase([*probe_common, "--interval", "10", "--duration", str(args.baseline_seconds), "--output", str(run_dir / "baseline.jsonl")], env, metadata, run_dir, "baseline")
         # Require actual successful baseline authorization before applying any response.
-        baseline = read_rows(run_dir / "baseline.jsonl")
-        record_phase(metadata, baseline, "baseline")
         if sum(item.get("kind") == "probe" and item.get("outcome") == "allowed" for item in baseline) < 2:
             raise RuntimeError("No successful baseline; response was not applied")
+        if args.capability == "blob-read":
+            actual_window = observation_window(args.action, args.duration, args.until_token_expiry, frozen_claims["exp"])
+            metadata["storage_preparation"] = assert_storage_window(manifest, args.storage_baseline_state, time.time() + actual_window["duration_seconds"] + 300)
         metadata["action_requested_at"] = datetime.now(timezone.utc).isoformat()
         save(run_dir / "trial.json", metadata)
         if args.action != "none":
@@ -244,11 +300,17 @@ def main() -> int:
             action_args = ["respond", *common, "--action", args.action, "--execute", "--confirm-lab-id", manifest["lab_id"], "--output", str(action_path)]
             if args.role_assignment_id:
                 action_args.extend(["--role-assignment-id", args.role_assignment_id])
-            invoke_harness(action_args, env)
-            receipts = [json.loads(line) for line in action_path.read_text(encoding="utf-8").splitlines() if line.strip()]
-            if len(receipts) != 1 or receipts[0].get("action") != args.action:
-                raise RuntimeError("Expected one exact action receipt")
-            metadata["action_receipt"] = {key: receipts[0].get(key) for key in ["action", "status", "http_status", "postcondition_verified", "request_started_at", "acknowledged_at", "target"]}
+            metadata["action_invocation_started"] = True
+            save(run_dir / "trial.json", metadata)
+            try:
+                invoke_harness(action_args, env)
+            finally:
+                if action_path.exists():
+                    receipts = read_rows(action_path)
+                    if len(receipts) != 1 or receipts[0].get("action") != args.action:
+                        raise RuntimeError("Expected one exact action receipt")
+                    metadata["action_receipt"] = {key: receipts[0].get(key) for key in ["action", "status", "http_status", "postcondition_verified", "request_started_at", "acknowledged_at", "target", "mutation_acknowledged", "postcondition_readback"]}
+                save(run_dir / "trial.json", metadata)
             if metadata["action_receipt"]["target"] != metadata["action_target"]:
                 raise RuntimeError("Action receipt target differs from the trial receipt")
         metadata["action_returned_at"] = datetime.now(timezone.utc).isoformat()
@@ -259,9 +321,9 @@ def main() -> int:
             try:
                 separate = request("POST", f"https://login.microsoftonline.com/{guid(manifest['tenant_id'])}/oauth2/v2.0/token",
                                    form={"grant_type": "client_credentials", "client_id": client_id,
-                                         "client_secret": client_secret, "scope": "https://management.azure.com/.default"})
+                                         "client_secret": client_secret, "scope": token_scope})
                 if "access_token" in separate:
-                    issued_claims = validate_actor_token(separate["access_token"], model, "arm")
+                    issued_claims = validate_actor_token(separate["access_token"], model, audience)
                     issuance.update(status="issued", token_metadata={key: issued_claims.get(key) for key in ("aud", "iat", "exp")})
                 else:
                     issuance["status"] = "unknown_response"
@@ -276,19 +338,18 @@ def main() -> int:
         window = observation_window(args.action, args.duration, args.until_token_expiry, frozen_claims["exp"])
         metadata["observation_window"] = window
         save(run_dir / "trial.json", metadata)
-        invoke_harness([*probe_common, "--duration", str(window["duration_seconds"]), "--output", str(run_dir / "post-action.jsonl")], env)
-        post = read_rows(run_dir / "post-action.jsonl")
-        record_phase(metadata, post, "post_action")
+        post = execute_probe_phase([*probe_common, "--interval", str(interval), "--duration", str(window["duration_seconds"]), "--output", str(run_dir / "post-action.jsonl")], env, metadata, run_dir, "post_action")
         action_rows = read_rows(run_dir / "action.jsonl") if args.action != "none" else []
         save(private_path(str(run_dir / "summary.json")), summarize_trial(metadata, baseline, action_rows, post))
         env.pop("STORMLAB_PROBE_TOKEN", None)
         frozen_token = ""
         metadata["status"] = "observation_completed"
         return 0
-    except (RuntimeError, SafetyError, ValueError, KeyError, subprocess.TimeoutExpired):
-        metadata["status"] = "failed_or_incomplete"
+    except BaseException as exc:
+        metadata["status"] = "interrupted" if isinstance(exc, (KeyboardInterrupt, SystemExit)) else "failed_or_incomplete"
         raise
     finally:
+        cleanup_error = None
         if credential_attempted:
             try:
                 assert_owned(manifest, args.subscription)
@@ -308,10 +369,14 @@ def main() -> int:
                 if confirmed.get("appId") != client_id or "passwordCredentials" not in confirmed or any(item.get("keyId") == credential_id for item in confirmed["passwordCredentials"]):
                     raise RuntimeError("Temporary credential absence is unverified")
                 metadata["credential_removed"] = True
-            except (RuntimeError, ValueError, KeyError):
+            except BaseException as exc:
+                cleanup_error = exc
                 metadata["credential_removed"] = False
                 metadata["cleanup_required"] = "Reconcile the recorded unique credential label/key ID on the owned application"
+                metadata["status"] = "interrupted" if isinstance(exc, (KeyboardInterrupt, SystemExit)) else "failed_or_incomplete"
         client_secret = ""
+        frozen_token = ""
+        env.pop("STORMLAB_PROBE_TOKEN", None)
         metadata["finished_at"] = datetime.now(timezone.utc).isoformat()
         try:
             metadata["source_changed_during_trial"] = any(hashlib.sha256(item.read_bytes()).hexdigest() != metadata["source_hashes"][str(item.relative_to(ROOT))] for item in source_paths)
@@ -319,15 +384,28 @@ def main() -> int:
             metadata["source_changed_during_trial"] = None
             metadata["source_verification"] = "unverifiable"
         save(run_dir / "trial.json", metadata)
+        if lease_acquired:
+            try:
+                uncertain_action = metadata.get("action_invocation_started") and metadata.get("action_receipt", {}).get("status") in {None, "indeterminate", "accepted_unverified"}
+                finish_trial(manifest, run_id, cleanup_confirmed=(not credential_attempted or metadata["credential_removed"]) and not uncertain_action, outcome=metadata["status"])
+            except BaseException as exc:
+                cleanup_error = cleanup_error or exc
+                metadata["cleanup_required"] = "Reconcile the recorded trial lease and credential state"
+                save(run_dir / "trial.json", metadata)
         print(json.dumps({"run_id": run_id, "status": metadata["status"], "credential_removed": metadata["credential_removed"],
                           "evidence": str(run_dir.relative_to(ROOT)), "scope": "one action and one capability; not whole-incident containment"}))
-        if credential_attempted and not metadata["credential_removed"]:
+        if isinstance(cleanup_error, (KeyboardInterrupt, SystemExit)):
+            raise cleanup_error from None
+        if cleanup_error or (credential_attempted and not metadata["credential_removed"]):
             raise RuntimeError("Temporary credential cleanup is unconfirmed; reconcile its recorded key ID")
 
 
 if __name__ == "__main__":
     try:
         raise SystemExit(main())
-    except (RuntimeError, SafetyError, ValueError, KeyError, subprocess.TimeoutExpired) as exc:
-        print(f"Trial stopped: {exc}", file=sys.stderr)
+    except KeyboardInterrupt:
+        print("Trial interrupted; inspect its private cleanup receipt before continuing.", file=sys.stderr)
+        raise SystemExit(130)
+    except Exception:
+        print("Trial stopped; inspect private evidence and cleanup state before continuing.", file=sys.stderr)
         raise SystemExit(1)

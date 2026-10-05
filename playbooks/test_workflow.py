@@ -5,6 +5,7 @@ It is not an Azure runtime validator and does not prove live containment.
 Run: python playbooks/test_workflow.py
 """
 import copy
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 import re
@@ -59,6 +60,7 @@ class Expression:
                 'workflow': lambda: self.context['workflow'],
                 'body': lambda name: self.context['replies'][name].get('body'),
                 'outputs': lambda name: self.context['replies'][name],
+                'actions': lambda name: {'status': self.context['replies'][name].get('status', 'Succeeded' if 200 <= self.context['replies'][name].get('statusCode', 0) < 300 else 'Failed')},
                 'triggerBody': lambda: self.context.get('trigger', {}),
                 'and': lambda *items: all(items),
                 'or': lambda *items: any(items),
@@ -76,7 +78,12 @@ class Expression:
                 'length': len,
                 'startsWith': lambda item, prefix: item.startswith(prefix),
                 'contains': lambda item, fragment: fragment in item,
-                'utcNow': lambda: '2026-10-05T12:00:00Z',
+                'utcNow': lambda: self.context.get('now', '2026-10-05T12:00:00Z'),
+                'ticks': lambda value: int((datetime.fromisoformat(value.replace('Z', '+00:00')) - datetime(1, 1, 1, tzinfo=timezone.utc)).total_seconds() * 10_000_000),
+                'greater': lambda a, b: a > b,
+                'greaterOrEquals': lambda a, b: a >= b,
+                'lessOrEquals': lambda a, b: a <= b,
+                'sub': lambda a, b: a - b,
             }
             result = funcs[token](*args)
         while self.i < len(self.tokens) and self.tokens[self.i] in ('.', '[', '?['):
@@ -117,13 +124,20 @@ class Runner:
 
     def actions(self, actions):
         for name, action in actions.items():
+            if name in self.context.get('clock_by_action', {}):
+                self.context['now'] = self.context['clock_by_action'][name]
             if any(self.status.get(dep) not in allowed for dep, allowed in action.get('runAfter', {}).items()):
                 self.status[name] = 'Skipped'
                 continue
             kind = action['type']
             self.status[name] = 'Succeeded'
             if kind == 'If':
-                self.actions(action['actions'] if self.evaluate(action['expression']) else action['else']['actions'])
+                try:
+                    selected = self.evaluate(action['expression'])
+                except (ValueError, TypeError, KeyError, IndexError, OverflowError):
+                    self.status[name], self.result = 'Failed', 'Failed'
+                    raise Stop()
+                self.actions(action['actions'] if selected else action['else']['actions'])
             elif kind == 'Terminate':
                 self.result = action['inputs']['runStatus']
                 raise Stop()
@@ -216,10 +230,19 @@ class WorkflowSafetyTests(unittest.TestCase):
         self.assertTrue(any(name == 'Read_group' for name, _, _ in run.calls))
 
     def test_initial_assignment_failure_is_never_idempotent_success(self):
-        for reply in ({'statusCode': 403}, {'statusCode': 429}, {'status': 'TimedOut'}):
+        for reply, expected in [({'statusCode': 403}, 'assignment_forbidden'), ({'statusCode': 429}, 'assignment_throttled'), ({'status': 'TimedOut'}, 'assignment_timeout')]:
             context = fixture(True)
             context['replies']['Read_assignment'] = reply
-            self.assertEqual(self.assert_no_delete(context).result, 'Failed')
+            run = self.assert_no_delete(context)
+            self.assertEqual(run.result, 'Failed')
+            self.assertEqual(run.composed[-1]['status'], expected)
+
+    def test_timed_out_delete_still_reads_exact_postcondition_without_claiming_removal(self):
+        context = fixture(True)
+        context['replies']['Delete_configured_assignment'] = {'status': 'TimedOut'}
+        run = Runner(context).run()
+        self.assertTrue(any(name == 'Read_after_delete' for name, _, _ in run.calls))
+        self.assertEqual(run.composed[-1]['status'], 'assignment_absent_delete_unconfirmed')
 
     def test_wrong_subscription_or_encoded_path_fails_before_network(self):
         for key, value in [('expectedSubscriptionId', '99999999-9999-4999-8999-999999999999'), ('targetRoleScope', '/other'), ('targetRoleAssignmentId', fixture()['parameters']['targetRoleAssignmentId'] + '%2f')]:

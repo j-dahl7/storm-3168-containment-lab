@@ -15,6 +15,8 @@ AzureActivity
 | where tolower(ActivityStatusValue) in ("failure", "failed")
 | where tolower(OperationNameValue) in (
     "microsoft.storage/storageaccounts/listkeys/action",
+    "microsoft.storage/storageaccounts/listaccountsas/action",
+    "microsoft.storage/storageaccounts/listservicesas/action",
     "microsoft.storage/storageaccounts/regeneratekey/action",
     "microsoft.storage/storageaccounts/delete",
     "microsoft.authorization/locks/delete")

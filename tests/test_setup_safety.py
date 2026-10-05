@@ -1,10 +1,12 @@
 import contextlib
 import io
+import json
+import copy
 import pathlib
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -17,6 +19,44 @@ LAB = "33333333-3333-4333-8333-333333333333"
 
 
 class OperatorSafetyTests(unittest.TestCase):
+    def partial_manifest(self):
+        data = json.loads((ROOT / "config/manifest.example.json").read_text())
+        data["role_assignments"] = []
+        data.pop("group", None)
+        data.pop("owned_secret_key_id", None)
+        data["actor"].pop("service_principal_object_id")
+        data["stages"] = ["resource-group-created", "foundation-created", "application-created"]
+        return data
+
+    def test_partial_application_receipt_can_be_validated_without_sp(self):
+        setup_lab.validate_identity_resume(self.partial_manifest())
+
+    def test_partial_resume_rejects_later_or_inconsistent_stage(self):
+        data = self.partial_manifest()
+        data["stages"].append("security-group-created")
+        with self.assertRaises(RuntimeError):
+            setup_lab.validate_identity_resume(data)
+
+    def test_resume_reconciles_only_sp_linked_to_recorded_owned_app(self):
+        data = self.partial_manifest()
+        app = {"id": data["actor"]["application_object_id"], "appId": data["actor"]["client_id"], "displayName": "storm3168-" + LAB, "tags": ["storm3168LabId=" + LAB]}
+        sp = {"id": "55555555-5555-4555-8555-555555555555", "appId": app["appId"], "displayName": app["displayName"], "servicePrincipalType": "Application", "appOwnerOrganizationId": data["tenant_id"]}
+        persist = Mock()
+        with patch.object(setup_lab, "assert_owned"), patch.object(setup_lab, "graph_token", return_value="synthetic"), patch.object(setup_lab, "request", side_effect=[app, {"value": [sp]}]) as req:
+            setup_lab.ensure_recorded_sp(data, SUB, persist)
+        self.assertTrue(all(call.args[0] == "GET" for call in req.call_args_list))
+        self.assertEqual(data["actor"]["service_principal_object_id"], sp["id"])
+        persist.assert_called_once()
+
+    def test_resume_does_not_adopt_wrong_app_owner_sp(self):
+        data = self.partial_manifest()
+        app = {"id": data["actor"]["application_object_id"], "appId": data["actor"]["client_id"], "displayName": "storm3168-" + LAB, "tags": ["storm3168LabId=" + LAB]}
+        wrong = {"id": SUB, "appId": app["appId"], "displayName": app["displayName"], "servicePrincipalType": "Application", "appOwnerOrganizationId": SUB}
+        with patch.object(setup_lab, "assert_owned"), patch.object(setup_lab, "graph_token", return_value="synthetic"), patch.object(setup_lab, "request", side_effect=[app, {"value": [wrong]}]) as req:
+            with self.assertRaises(RuntimeError):
+                setup_lab.ensure_recorded_sp(data, SUB, Mock())
+        self.assertTrue(all(call.args[0] == "GET" for call in req.call_args_list))
+
     def test_rejects_noncanonical_subscription(self):
         with self.assertRaises(ValueError):
             lab_support.guid("../../subscriptions/prod")

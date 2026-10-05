@@ -1,6 +1,7 @@
 """Offline response-workflow orchestration tests; no Azure access."""
 import copy
 import json
+import subprocess
 from pathlib import Path
 import sys
 import tempfile
@@ -50,7 +51,7 @@ class FakeCloud:
         self.workflow = {"id": state["workflow_id"], "tags": {"storm3168LabId": m["lab_id"]},
                          "identity": {"type": "SystemAssigned", "principalId": state["responder_object_id"], "tenantId": m["tenant_id"]},
                          "properties": {"state": "Disabled", "parameters": {},
-                                        "accessControl": {"triggers": {"sasAuthenticationPolicy": {"state": "Disabled"}, "allowedCallerIpAddresses": []}}}}
+                                        "accessControl": {"triggers": {"sasAuthenticationPolicy": {"state": "Disabled"}, "allowedCallerIpAddresses": [{"addressRange": "0.0.0.0-0.0.0.0"}]}}}}
         values = {"expectedSubscriptionId": m["subscription_id"], "labId": m["lab_id"], "resourceGroupId": pb.rg_id(m),
                   "actorObjectId": m["actor"]["service_principal_object_id"], "targetRoleAssignmentId": state["assignment"]["id"],
                   "targetRoleScope": state["assignment"]["scope"], "targetRoleDefinitionId": state["assignment"]["role_definition_id"],
@@ -100,6 +101,9 @@ class FakeCloud:
         if target.endswith("/cancel"):
             self.cancelled = self.scenario != "cancel_unverified"
             return reply()
+        if target.endswith("/runs/new/actions"):
+            name = "Record_already_absent" if self.scenario == "already_absent" else "Record_dry_run" if self.workflow["properties"]["parameters"]["dryRun"]["value"] else "Record_result"
+            return reply(data={"value": [{"id": self.state["workflow_id"] + "/runs/new/actions/" + name, "name": name, "properties": {"status": "Succeeded"}}]})
         if target == base + "/runs":
             if self.scenario == "pagination":
                 return reply(data={"value": [], "nextLink": "https://never-follow.example"})
@@ -107,7 +111,7 @@ class FakeCloud:
             if self.scenario == "old_active":
                 rows[0]["properties"]["status"] = "Running"
             if self.started and self.scenario != "unknown":
-                status = "Cancelled" if self.cancelled else "Succeeded" if self.scenario in {"success", "disable_unverified"} else "Running"
+                status = "Cancelled" if self.cancelled else "Succeeded" if self.scenario in {"success", "disable_unverified", "already_absent"} else "Running"
                 rows.append(self.row("new", status))
                 if self.scenario == "concurrent":
                     rows.append(self.row("other-new", "Running"))
@@ -137,6 +141,35 @@ class PlaybookOperatorTests(unittest.TestCase):
         self.assertEqual(cloud.deployments, [False, True])
         self.assertTrue(any(row["last_run"]["name"] == "new" for row in cloud.receipts))
         self.assertFalse(any(url.endswith("/cancel?api-version=2016-06-01") for _, url in cloud.calls))
+        self.assertEqual(state["last_run"]["response_outcome"], "role_assignment_removed_access_unverified")
+
+    def test_already_absent_executor_is_distinct_from_role_removal(self):
+        state, _ = self.exercise("already_absent")
+        self.assertEqual(state["last_run"]["response_outcome"], "already_absent_access_unverified")
+
+    def test_disable_restore_cancels_only_recorded_run_and_restores_dryrun(self):
+        m, state = setup()
+        cloud = FakeCloud(m, state, "timeout")
+        cloud.started = True
+        cloud.workflow["properties"]["state"] = "Enabled"
+        state['last_run'] = {'name': 'new', 'status': 'Running'}
+        state['cleanup_problems'] = ['workflow_disabled_unverified']
+        with patch.object(pb, 'assert_owned'), patch.object(pb, 'deploy', side_effect=cloud.deploy), patch.object(pb, 'save', side_effect=cloud.record):
+            pb.disable_restore(m, state, Path('never-written.json'), cloud, Operator(), timeout=0)
+        self.assertTrue(state['disabled_verified'])
+        self.assertTrue(state['safe_configuration_restored'])
+        self.assertEqual(state['cleanup_problems'], [])
+        self.assertEqual(sum('/runs/new/cancel?' in url for _, url in cloud.calls), 1)
+
+    def test_disable_restore_does_not_adopt_unrecorded_queued_run(self):
+        m, state = setup()
+        cloud = FakeCloud(m, state, 'timeout')
+        cloud.started = True
+        with patch.object(pb, 'assert_owned'), patch.object(pb, 'save', side_effect=cloud.record):
+            with self.assertRaises(RuntimeError):
+                pb.disable_restore(m, state, Path('never-written.json'), cloud, Operator(), timeout=0)
+        self.assertFalse(any('/cancel?' in url for _, url in cloud.calls))
+        self.assertTrue(state['execution_state_unknown'])
 
     def test_timeout_cancels_only_new_run_before_safe_restore(self):
         state, cloud = self.exercise("timeout", raises=True)
@@ -257,7 +290,7 @@ class PlaybookOperatorTests(unittest.TestCase):
                 pb.independent_shutdown(proof, state, cloud, Operator(), timeout=0)
             self.assertFalse(any(method == "POST" for method, _ in cloud.calls))
             self.assertFalse(state["disabled_verified"])
-            self.assertEqual(state["shutdown"]["outcome"], "unknown")
+            self.assertEqual(state["shutdown"]["outcome"], "ownership_drift_refused")
 
     def test_stop_target_comes_from_immutable_proof_not_changed_state(self):
         m, state = setup()
@@ -321,15 +354,41 @@ class PlaybookOperatorTests(unittest.TestCase):
         self.assertFalse(state["disabled_verified"])
         self.assertEqual(state["shutdown"]["outcome"], "unknown")
 
-    def test_expired_proof_has_no_cross_invocation_authority(self):
+    def test_expired_activation_proof_still_stops_same_invocation(self):
         m, state = setup()
         cloud, clock = FakeCloud(m, state), Clock()
         with patch.object(pb, "assert_owned"), patch.object(pb.time, "monotonic", clock.monotonic):
             proof = pb.capture_shutdown_proof(m, state, cloud, Operator())
             clock.now = pb.SHUTDOWN_PROOF_SECONDS
-            with self.assertRaisesRegex(RuntimeError, "proof expired"):
-                pb.independent_shutdown(proof, state, cloud, Operator(), timeout=0)
-        self.assertFalse(any(method == "POST" for method, _ in cloud.calls))
+            cloud.workflow["properties"]["state"] = "Enabled"
+            pb.independent_shutdown(proof, state, cloud, Operator(), timeout=0)
+        self.assertTrue(state["shutdown"]["activation_proof_expired"])
+        self.assertTrue(state["disabled_verified"])
+        self.assertEqual(sum("/disable?" in url for _, url in cloud.calls), 1)
+
+    def test_transient_disable_and_timeout_are_retried_then_verified(self):
+        for failure in (reply(503), reply(429), subprocess.TimeoutExpired("not-recorded", 1)):
+            m, state = setup()
+            cloud, clock = FakeCloud(m, state), Clock()
+            with patch.object(pb, "assert_owned"), patch.object(pb.time, "monotonic", clock.monotonic):
+                proof = pb.capture_shutdown_proof(m, state, cloud, Operator())
+            cloud.workflow["properties"]["state"] = "Enabled"
+            original = cloud.request
+            attempts = []
+            def request(method, url, *args):
+                if "/disable?" in url:
+                    attempts.append(url)
+                    if len(attempts) == 1:
+                        if isinstance(failure, Exception):
+                            raise failure
+                        return failure
+                return original(method, url, *args)
+            with patch.object(cloud, "request", side_effect=request), patch.object(pb.time, "monotonic", clock.monotonic), patch.object(pb.time, "sleep", clock.sleep):
+                pb.independent_shutdown(proof, state, cloud, Operator(), timeout=10)
+            self.assertEqual(len(attempts), 2)
+            self.assertEqual(len(set(attempts)), 1)
+            self.assertTrue(state["disabled_verified"])
+            self.assertNotIn("not-recorded", json.dumps(state))
 
     def test_unresolved_shutdown_receipt_blocks_another_invocation(self):
         m, state = setup()

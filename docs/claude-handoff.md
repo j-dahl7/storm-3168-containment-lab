@@ -7,11 +7,20 @@ test plan and `docs/review-checklist.md`. Review code and primary sources, not t
 earlier brainstorming summaries. In particular, 90 minutes is not a documented
 warning-to-wipe interval, and the exposed secret was not confirmed as initial access.
 
-For the current recheck, start with `docs/review-remediation.md`. It maps the
-owner-supplied findings to fixes and reproductions. Check trial-level summary
-linkage, SAS error sanitization, network-policy classification, the emergency
-DISABLE exception, export scope, and the storage baseline lifetime. The new
-source has not been deployed or tested through live response actions.
+For the current recheck, start with `docs/review-remediation.md`. This pass used
+both full reports, including round two at `f70569a`; the earlier summary-only
+handoff missed findings. Check first-denial provenance, neutral observation gaps,
+prerequisite-read rejection versus an unattempted write, default lifetime windows,
+partial run linkage and cleanup interruptions. Reproduce shutdown retries with
+expired same-invocation proof, storage rollback with failed receipt persistence,
+and an old provider event delivered inside a new incident. The new source has
+not been deployed or tested through live response actions.
+
+Claude's five corrected visuals are integrated. The site's article now separates
+documented expectations from pending observations, uses mobile result cards and
+pins its source links. Its explanatory images are not lab evidence. Publication
+and the full repeated series remain pending; Phase 3 still needs manual
+coordination of fixed credentials and controls.
 
 ## Reproduce the offline checks
 
@@ -29,7 +38,7 @@ not a claim that Kusto compiled the queries.
 
 ## Highest-priority review targets
 
-1. `src/stormlab/core.py`: fixed credentials, no probe/mutation retries, exact-ID
+1. `src/stormlab/core.py`: fixed credentials, no probe retries, exact-ID
    guards, SAS handling, evidence classification and correct Shared Key signing.
 2. `scripts/live_trial.py`: initial issuance retries happen **before** freezing
    a token; temporary credentials are removed in `finally`; separate baseline
@@ -39,8 +48,9 @@ not a claim that Kusto compiled the queries.
    paths and direct/group permission isolation.
 4. `playbooks/`: fresh incident/alert evidence, exact rule/custom-detail checks,
    guarded configured target, ABAC grant, safe dry-run and disable behavior.
-5. `scripts/playbook_lab.py` and `cleanup_lab.py`: active-run handling, mutation
-   acknowledgment versus verified state, residual roles and retained resources.
+5. `scripts/playbook_lab.py`, `storage_baseline.py` and `cleanup_lab.py`: bounded
+   idempotent shutdown/restore retries, active-run handling, acknowledgment versus
+   verified state, exact recorded exports, residual roles and retained resources.
 6. `detections/` and `workbooks/`: real schemas, delayed events, correct actor
    identification, source and ingestion clocks, false positives and duplication.
 
