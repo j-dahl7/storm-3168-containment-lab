@@ -27,6 +27,7 @@ sys.path.insert(0, str(ROOT / "src"))
 from stormlab.core import Manifest, SafetyError, response_target, summarize_trial, validate_actor_token
 from trial_state import begin_trial, finish_trial
 from storage_baseline import assert_storage_window
+import manual_executor_trial
 
 TOKEN_ACTIONS = {"sp-disable", "app-deactivate", "secret-remove"}
 
@@ -91,8 +92,10 @@ def execute_probe_phase(arguments: list[str], env: dict[str, str], metadata: dic
 
 
 def validate_pairing(action: str, capability: str) -> None:
-    if action in {"role-delete", "group-member-remove"} and capability == "arm-read":
+    if action in {"role-delete", "group-member-remove", "manual-executor"} and capability == "arm-read":
         raise SafetyError("Reader remains a healthy control; use arm-tag-write or listkeys to measure writer removal")
+    if action == "manual-executor" and capability not in {"arm-tag-write", "listkeys"}:
+        raise SafetyError("CORE09 measures arm-tag-write or listkeys against its direct writer assignment")
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -171,7 +174,7 @@ def main() -> int:
     parser.add_argument("--manifest", default="private/manifest.json")
     parser.add_argument("--subscription", required=True, type=guid)
     parser.add_argument("--confirm-lab-id", required=True, type=guid)
-    parser.add_argument("--action", required=True, choices=["none", "role-delete", "sp-disable", "app-deactivate", "secret-remove", "group-member-remove"])
+    parser.add_argument("--action", required=True, choices=["none", "role-delete", "sp-disable", "app-deactivate", "secret-remove", "group-member-remove", "manual-executor"])
     parser.add_argument("--capability", choices=["arm-read", "arm-tag-write", "listkeys", "blob-read"], default="arm-tag-write")
     parser.add_argument("--storage-baseline-state", help="Required for blob-read: explicit prepared storage receipt covering the entire trial")
     parser.add_argument("--duration", type=int, help="Explicit post-action observation seconds, 20..7200; overrides the action default")
@@ -182,10 +185,11 @@ def main() -> int:
     parser.add_argument("--check-new-token", action="store_true", help="Separate issuance control; never replaces the fixed probe token")
     parser.add_argument("--execute", action="store_true")
     args = parser.parse_args()
+    canonical_action = "role-delete" if args.action == "manual-executor" else args.action
     if not 20 <= args.baseline_seconds <= 120 or (args.interval is not None and not 5 <= args.interval <= 60):
         parser.error("Baseline must be 20..120 seconds; interval 5..60")
     try:
-        window = observation_window(args.action, args.duration, args.until_token_expiry)
+        window = observation_window(canonical_action, args.duration, args.until_token_expiry)
     except ValueError as exc:
         parser.error(str(exc))
     interval = args.interval if args.interval is not None else 60 if window["mode"] == "until_token_expiry" else 10
@@ -196,7 +200,11 @@ def main() -> int:
     model = Manifest.from_dict(manifest)
     audience = "storage" if args.capability == "blob-read" else "arm"
     token_scope = "https://storage.azure.com/.default" if audience == "storage" else "https://management.azure.com/.default"
-    target = response_target(model, args.action, args.role_assignment_id)
+    target = response_target(model, canonical_action, args.role_assignment_id)
+    if args.action == "manual-executor":
+        _, _, executor_target = manual_executor_trial.load_bound_state(manifest, args.role_assignment_id)
+        if executor_target != target:
+            raise SafetyError("Manual executor target differs from the trial target")
     actor = manifest["actor"]
     app_id = guid(actor["application_object_id"])
     client_id = guid(actor["client_id"])
@@ -219,13 +227,17 @@ def main() -> int:
     run_dir.mkdir(parents=True, exist_ok=False)
     trial_manifest = dict(manifest)
     trial_path = private_path(str(run_dir / "manifest.json"))
-    metadata = {"schema_version": 1, "run_id": run_id, "mode": "live", "action": args.action,
+    metadata = {"schema_version": 1, "run_id": run_id, "mode": "live", "action": canonical_action,
+                "orchestration_action": args.action,
+                "response_transport": "guarded_logic_app" if args.action == "manual-executor" else "operator_harness",
                 "auth": "bearer", "credential_label": str(uuid.uuid4()), "action_target": target, "access_path": target["access_path"],
                 "separate_new_token_check": {"status": "not_requested", "replaces_probe_token": False},
                 "capability": args.capability, "status": "started", "started_at": datetime.now(timezone.utc).isoformat(),
                 "location": model.location, "probe_interval_seconds": interval,
                 "source_manifest": str(path.relative_to(ROOT)), "token_refresh": False, "credential_removed": False}
     source_paths = sorted((ROOT / "src").rglob("*.py")) + sorted((ROOT / "scripts").glob("*.py"))
+    if args.action == "manual-executor":
+        source_paths += sorted((ROOT / "playbooks").glob("*.bicep")) + sorted((ROOT / "playbooks").glob("*.json"))
     metadata["source_hashes"] = {str(item.relative_to(ROOT)): hashlib.sha256(item.read_bytes()).hexdigest() for item in source_paths}
     revision = subprocess.run(["git", "rev-parse", "--verify", "HEAD"], cwd=ROOT, capture_output=True, text=True, check=False)
     metadata["source_commit"] = revision.stdout.strip() if revision.returncode == 0 else None
@@ -256,7 +268,7 @@ def main() -> int:
         metadata["credential_key_id"] = credential_id  # Identifier only; never secretText.
         save(run_dir / "trial.json", metadata)
         trial_manifest["owned_secret_key_id"] = credential_id
-        metadata["action_target"] = response_target(Manifest.from_dict(trial_manifest), args.action, args.role_assignment_id)
+        metadata["action_target"] = response_target(Manifest.from_dict(trial_manifest), canonical_action, args.role_assignment_id)
         save(trial_path, trial_manifest)
         client_secret = credential["secretText"]
         # Bounded initial issuance only. No token has been frozen yet; this is
@@ -291,25 +303,34 @@ def main() -> int:
         if sum(item.get("kind") == "probe" and item.get("outcome") == "allowed" for item in baseline) < 2:
             raise RuntimeError("No successful baseline; response was not applied")
         if args.capability == "blob-read":
-            actual_window = observation_window(args.action, args.duration, args.until_token_expiry, frozen_claims["exp"])
+            actual_window = observation_window(canonical_action, args.duration, args.until_token_expiry, frozen_claims["exp"])
             metadata["storage_preparation"] = assert_storage_window(manifest, args.storage_baseline_state, time.time() + actual_window["duration_seconds"] + 300)
         metadata["action_requested_at"] = datetime.now(timezone.utc).isoformat()
         save(run_dir / "trial.json", metadata)
         if args.action != "none":
             action_path = private_path(str(run_dir / "action.jsonl"))
-            action_args = ["respond", *common, "--action", args.action, "--execute", "--confirm-lab-id", manifest["lab_id"], "--output", str(action_path)]
+            action_args = ["respond", *common, "--action", canonical_action, "--execute", "--confirm-lab-id", manifest["lab_id"], "--output", str(action_path)]
             if args.role_assignment_id:
                 action_args.extend(["--role-assignment-id", args.role_assignment_id])
             metadata["action_invocation_started"] = True
             save(run_dir / "trial.json", metadata)
             try:
-                invoke_harness(action_args, env)
+                if args.action == "manual-executor":
+                    # The executor receives no env/token/secret; only the
+                    # operator-authenticated adapter changes the configured role.
+                    manual_executor_trial.invoke(trial_manifest, args.subscription, args.role_assignment_id, action_path)
+                else:
+                    invoke_harness(action_args, env)
             finally:
                 if action_path.exists():
                     receipts = read_rows(action_path)
-                    if len(receipts) != 1 or receipts[0].get("action") != args.action:
+                    if len(receipts) != 1 or receipts[0].get("action") != canonical_action:
                         raise RuntimeError("Expected one exact action receipt")
                     metadata["action_receipt"] = {key: receipts[0].get(key) for key in ["action", "status", "http_status", "postcondition_verified", "request_started_at", "acknowledged_at", "target", "mutation_acknowledged", "postcondition_readback"]}
+                    if args.action == "manual-executor":
+                        metadata["executor_receipt"] = receipts[0].get("executor", {})
+                        metadata["action_clock_source"] = receipts[0].get("executor_action", {}).get("clock_source", "unverified")
+                        metadata["observation_gap_note"] = receipts[0].get("measurement_limit")
                 save(run_dir / "trial.json", metadata)
             if metadata["action_receipt"]["target"] != metadata["action_target"]:
                 raise RuntimeError("Action receipt target differs from the trial receipt")
@@ -335,12 +356,21 @@ def main() -> int:
             issuance["response_received_at"] = datetime.now(timezone.utc).isoformat()
             metadata["separate_new_token_check"] = issuance
             save(run_dir / "trial.json", metadata)
-        window = observation_window(args.action, args.duration, args.until_token_expiry, frozen_claims["exp"])
+        window = observation_window(canonical_action, args.duration, args.until_token_expiry, frozen_claims["exp"])
         metadata["observation_window"] = window
         save(run_dir / "trial.json", metadata)
         post = execute_probe_phase([*probe_common, "--interval", str(interval), "--duration", str(window["duration_seconds"]), "--output", str(run_dir / "post-action.jsonl")], env, metadata, run_dir, "post_action")
         action_rows = read_rows(run_dir / "action.jsonl") if args.action != "none" else []
-        save(private_path(str(run_dir / "summary.json")), summarize_trial(metadata, baseline, action_rows, post))
+        summary = summarize_trial(metadata, baseline, action_rows, post)
+        if args.action == "manual-executor":
+            earlier = [r for r in baseline if r.get("kind") == "probe"][-1]
+            later = [r for r in post if r.get("kind") == "probe"]
+            gap = (datetime.fromisoformat(later[0]["request_started_at"]) - datetime.fromisoformat(earlier["response_received_at"])).total_seconds() if later else None
+            metadata["controller_observation_gap_seconds"] = gap
+            summary.update(orchestration_action="manual-executor", response_transport="guarded_logic_app",
+                           controller_observation_gap_seconds=gap, executor_outcome=metadata["executor_receipt"].get("response_outcome"),
+                           action_clock_source=metadata["action_clock_source"])
+        save(private_path(str(run_dir / "summary.json")), summary)
         env.pop("STORMLAB_PROBE_TOKEN", None)
         frozen_token = ""
         metadata["status"] = "observation_completed"
@@ -387,6 +417,8 @@ def main() -> int:
         if lease_acquired:
             try:
                 uncertain_action = metadata.get("action_invocation_started") and metadata.get("action_receipt", {}).get("status") in {None, "indeterminate", "accepted_unverified"}
+                if args.action == "manual-executor" and metadata.get("action_invocation_started"):
+                    uncertain_action = uncertain_action or metadata.get("executor_receipt", {}).get("cleanup_verified") is not True
                 finish_trial(manifest, run_id, cleanup_confirmed=(not credential_attempted or metadata["credential_removed"]) and not uncertain_action, outcome=metadata["status"])
             except BaseException as exc:
                 cleanup_error = cleanup_error or exc

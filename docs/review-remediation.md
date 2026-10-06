@@ -1,5 +1,9 @@
 # Review remediation and recheck handoff
 
+For the subsequent owner-authorized live acceptance pass, including the new
+storage runner and transport/query fixes, see [live execution status](live-execution-status.md).
+The round-two inventory below describes the earlier remediation checkpoint.
+
 The second pass uses both full independent reports: the initial review of
 `5c76c43` and round two at `f70569a`. The previous pass used the pasted summary
 and missed findings; this table replaces its incomplete inventory. The reports

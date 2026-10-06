@@ -689,5 +689,22 @@
       }
     }
   },
-  "outputs": {}
+  "outputs": {
+    "incidentId": {
+      "type": "String",
+      "value": "@string(triggerBody()?['object']?['id'])"
+    },
+    "providerEventId": {
+      "type": "String",
+      "value": "@string(first(body('Parse_custom_details')?['ProviderEventId']))"
+    },
+    "providerEventTime": {
+      "type": "String",
+      "value": "@string(first(body('Parse_custom_details')?['ProviderEventTime']))"
+    },
+    "dispatchMode": {
+      "type": "String",
+      "value": "@if(parameters('dispatchEnabled'), 'forwarding_requested', 'preview_only')"
+    }
+  }
 }

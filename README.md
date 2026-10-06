@@ -10,6 +10,7 @@ Microsoft's [September 25 investigation](https://www.microsoft.com/en-us/securit
 
 - [Six-phase protocol](docs/test-plan.md) and [12-case core matrix](docs/test-matrix.csv): 13 configurations, at least 39 independent trials; [66-case extended catalog](docs/test-matrix-extended.csv) is optional.
 - [Operator handbook](docs/operator-handbook.md)
+- [Live execution status](docs/live-execution-status.md) and [six-channel storage runner](docs/storage-trial-runner.md)
 - [Claude Code review checklist](docs/review-checklist.md)
 - [Article draft](docs/article-draft.md), with no invented results
 - [Source ledger](docs/source-ledger.md)

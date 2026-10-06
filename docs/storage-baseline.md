@@ -60,7 +60,7 @@ Core key1 and key2 regeneration are **separate configurations**, each with a fre
 
 Existing --auth bearer, shared-key and sas probes use the prepared manifest's exact blob. SAS must be read-only, HTTPS and explicitly expiring; no SAS URI or signature is saved.
 
-Phase 3 has a [manual parallel-channel protocol](phase3-manual.md) and an offline linkage helper. It has no automatic multi-credential issuance/action runner. That orchestration remains a limitation for a full repeated series; do not present it as automatic or live-verified.
+Phase 3 has an [automated six-channel storage runner](storage-trial-runner.md), with a [manual protocol](phase3-manual.md) retained as a fallback. The automated path uses this preparation helper's embedded callback and restores settings as soon as a cohort finishes. Runtime results still require successful live baselines, known action receipts and verified cleanup; offline tests do not establish them.
 
 The tiny nonce blob and a bounded number of requests keep storage usage small, but this is not a spending cap. Storage/Log Analytics/Sentinel and any later playbook charges remain applicable. No VM, private endpoint, new license or paid feed is provisioned by this helper.
 

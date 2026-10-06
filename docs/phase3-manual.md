@@ -1,6 +1,6 @@
 # Phase 3 manual parallel-channel protocol
 
-**Source-only protocol; no live Phase 3 result is claimed.** There is no automatic six-credential runner or SAS issuance helper. The commands below use the implemented fixed-credential probe/respond interfaces. An operator coordinates the six channels and one response; scripts/phase3_link.py only validates and summarizes evidence afterward. A full repeated series still requires this manual coordination or a separately reviewed runner.
+**Source-only fallback protocol; no live Phase 3 result is claimed.** The [automated storage runner](storage-trial-runner.md) now coordinates the six channels and issues bounded SAS in memory. The commands below remain a manual alternative using the fixed-credential probe/respond interfaces; scripts/phase3_link.py validates and summarizes its evidence afterward. Do not mix the two orchestration paths within a cohort.
 
 ## One configuration, one action
 

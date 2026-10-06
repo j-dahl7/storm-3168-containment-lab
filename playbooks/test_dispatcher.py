@@ -180,7 +180,8 @@ class DispatcherSafetyTests(unittest.TestCase):
         self.assertEqual(trigger['type'], 'ApiConnectionWebhook')
         self.assertEqual(trigger['inputs']['path'], '/incident-creation')
         self.assertEqual(trigger['inputs']['body']['callback_url'], '@{listCallbackUrl()}')
-        self.assertEqual(DISPATCHER['outputs'], {})
+        self.assertEqual(set(DISPATCHER['outputs']), {'incidentId', 'providerEventId', 'providerEventTime', 'dispatchMode'})
+        self.assertNotIn('listCallbackUrl', json.dumps(DISPATCHER['outputs']))
         self.assertFalse(DISPATCHER['parameters']['dispatchEnabled']['defaultValue'])
         self.assertNotIn('body', DISPATCHER['actions']['Dispatch_gate']['actions']['Invoke_executor']['inputs'])
 

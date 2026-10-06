@@ -2,6 +2,25 @@
 
 Date: 2026-10-05. This is an implementation-readiness record, not the article's results table.
 
+## Live execution acceptance pass
+
+The owner authorized collecting live results after the source-review fixes.
+[Live execution status](live-execution-status.md) records accepted evidence and
+failed attempts separately. The first new pilot at `aea75ae` failed its baseline
+because of transport errors; its response action was never invoked and temporary
+credential cleanup was verified. It is not a containment result.
+
+This follow-up source revision has 323 passing offline tests (299 operator/harness
+and 24 workflow), a reviewed direct HTTPS transport, a six-channel storage runner
+and a guarded manual-executor adapter. The corrected query pipeline executed in
+Azure Monitor as synthetic data: all 18 individual cases and the full-batch case
+passed. Six read-only live calls with the replacement transport returned 200 and
+matched the expected ownership metadata. These validate transport/query acceptance,
+not real event ingestion, response timing or the repeated containment series.
+
+The historical sections below retain their original evidence boundaries. The new
+storage and native-delivery adapters still require their own live acceptance.
+
 ## Current second-review remediation
 
 Both full independent reports were available for this source pass. The

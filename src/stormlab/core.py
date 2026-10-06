@@ -10,6 +10,7 @@ import math
 import os
 import re
 import shutil
+import ssl
 import subprocess
 import time
 import urllib.error
@@ -316,19 +317,96 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
+def validated_https_endpoint(url: str) -> urllib.parse.SplitResult:
+    """Same allowlist for the public client and its injectable opener boundary."""
+    try:
+        if not isinstance(url, str) or any(ord(c) < 33 or ord(c) > 126 for c in url):
+            raise ValueError()
+        parsed = urllib.parse.urlsplit(url)
+        if parsed.scheme != "https" or parsed.username or parsed.password or parsed.port not in {None, 443} or parsed.fragment:
+            raise ValueError()
+        host = parsed.hostname or ""
+        if host not in {"management.azure.com", "graph.microsoft.com"} and not re.fullmatch(r"[a-z0-9]{3,24}\.blob\.core\.windows\.net", host):
+            raise ValueError()
+        return parsed
+    except (ValueError, UnicodeError):
+        raise SafetyError("Only allowlisted HTTPS Azure endpoints without userinfo, fragments or alternate ports are allowed") from None
+
+
+class BoundedHTTPSResponse:
+    """urllib-compatible surface; owns and always closes its HTTPS connection."""
+    def __init__(self, response: http.client.HTTPResponse, connection: http.client.HTTPSConnection):
+        self._response, self._connection = response, connection
+        self.code = response.status
+        self.headers = response.headers
+        self._remaining = MAX_RESPONSE + 1
+
+    def read(self, amount: int | None = None) -> bytes:
+        limit = self._remaining if amount is None or amount < 0 else min(amount, self._remaining)
+        if limit == 0:
+            return b""
+        payload = self._response.read(limit)
+        self._remaining -= len(payload)
+        return payload
+
+    def close(self) -> None:
+        try:
+            self._response.close()
+        finally:
+            self._connection.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self.close()
+        return False
+
+
+class DirectHTTPSOpener:
+    """One direct TLS connection, no proxy lookup, redirect or auth retry.
+
+    Keep .open(Request, timeout=...) injectable for existing tests and the raw
+    Blob helper. TLS uses Python's default trusted context with hostname checks.
+    """
+    def open(self, request: urllib.request.Request, timeout: float = 20) -> BoundedHTTPSResponse:
+        if not isinstance(request, urllib.request.Request):
+            raise SafetyError("The transport accepts an explicit HTTPS Request only")
+        parsed = validated_https_endpoint(request.full_url)
+        if type(timeout) not in {int, float} or not math.isfinite(timeout) or not 0 < timeout <= 300:
+            raise SafetyError("Transport timeout must be finite and bounded")
+        method = request.get_method()
+        if method not in {"GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"}:
+            raise SafetyError("Unsupported HTTP method")
+        headers = dict(request.header_items())
+        for name, value in headers.items():
+            if name.lower() in {"proxy-authorization", "proxy-connection"}:
+                raise SafetyError("Proxy headers are not permitted")
+            if name.lower() == "host" and value.lower() not in {parsed.hostname, parsed.hostname + ":443"}:
+                raise SafetyError("Explicit Host must match the allowlisted HTTPS endpoint")
+        context = ssl.create_default_context()
+        if context.verify_mode != ssl.CERT_REQUIRED or context.check_hostname is not True:
+            raise SafetyError("Trusted certificate and hostname verification are required")
+        connection = http.client.HTTPSConnection(parsed.hostname, port=443, timeout=timeout, context=context)
+        target = parsed.path or "/"
+        if parsed.query:
+            target += "?" + parsed.query
+        try:
+            connection.request(method, target, body=request.data, headers=headers)
+            return BoundedHTTPSResponse(connection.getresponse(), connection)
+        except BaseException:
+            connection.close()
+            raise
+
+
 class HTTP:
     """No redirects, implicit auth, proxy auth, or retries. Bounded response size."""
     def __init__(self, timeout: int = 20):
         self.timeout = timeout
-        self.opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+        self.opener = DirectHTTPSOpener()
 
     def request(self, method: str, url: str, headers: dict | None = None, body: dict | None = None) -> Response:
-        parsed = urllib.parse.urlsplit(url)
-        if parsed.scheme != "https" or parsed.username or parsed.password or parsed.port not in {None, 443}:
-            raise SafetyError("Only HTTPS service endpoints are allowed")
-        host = parsed.hostname or ""
-        if host not in {"management.azure.com", "graph.microsoft.com"} and not re.fullmatch(r"[a-z0-9]{3,24}\.blob\.core\.windows\.net", host):
-            raise SafetyError("Host is not an allowed Azure service")
+        validated_https_endpoint(url)
         payload = json.dumps(body, separators=(",", ":")).encode() if body is not None else None
         req_headers = dict(headers or {})
         if payload is not None:

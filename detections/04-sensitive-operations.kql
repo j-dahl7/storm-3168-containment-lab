@@ -35,6 +35,6 @@ AzureActivity
                               tolower(OperationNameValue) endswith "/regeneratekey/action", 2, 1)
 | order by SignalPriority desc, TimeGenerated asc, EventDataId asc
 | take 1
-| project TimeGenerated, ProviderEventTime = format_datetime(TimeGenerated, "yyyy-MM-ddTHH:mm:ss.fffffffZ"), ArrivalTime, ArrivalClock, EventSubmissionTimestamp, LabId = ConfiguredLabId,
+| project TimeGenerated, ProviderEventTime = strcat(format_datetime(TimeGenerated, "yyyy-MM-dd"), "T", format_datetime(TimeGenerated, "HH:mm:ss.fffffff"), "Z"), ArrivalTime, ArrivalClock, EventSubmissionTimestamp, LabId = ConfiguredLabId,
     ActorObjectId = ActorOid, CallerIpAddress, ResourceId, OperationNameValue,
     ActivityStatusValue, ActivitySubstatusValue, CorrelationId, OperationId, EventDataId

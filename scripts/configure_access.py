@@ -23,6 +23,7 @@ from trial_state import begin_trial, finish_trial, record_access_settling
 
 READER = "acdd72a7-3385-48ef-bd42-f606fba81ae7"
 STORAGE_WRITER = "17d1049b-9a84-46fb-8f53-869881c3d3ab"
+DATA_READER = "2a2b9908-6ea1-4ae2-8e65-a410df84e7d1"
 
 
 def save_manifest(path: Path, data: dict) -> None:
@@ -95,6 +96,14 @@ def inventory(guard: Guard) -> dict:
         if definition.rsplit("/", 1)[-1].lower() == READER:
             continue
         recorded_row = recorded.get(rid.lower())
+        exact_data_control = (recorded_row is not None and principal == actor
+                              and definition.lower() == role_definition_id(m, DATA_READER).lower()
+                              and recorded_row["role_definition_id"].lower() == definition.lower()
+                              and str(p.get("scope", "")).lower() == m.storage_id.lower()
+                              and recorded_row["scope"].lower() == m.storage_id.lower()
+                              and recorded_row["principal_id"] == actor)
+        if exact_data_control:
+            continue
         expected_writer = (recorded_row is not None
                            and recorded_row["role_definition_id"].lower() == role_definition_id(m, STORAGE_WRITER).lower()
                            and recorded_row["scope"].lower() == m.rg_id.lower()
@@ -238,12 +247,62 @@ def configure(data: dict, guard: Guard, mode: str, *, execute: bool, enable_acto
             "reader_assignment_id": reader["id"], "writer_assignment_id": writer["id"]}
 
 
+def configure_data_reader(data: dict, guard: Guard, operation: str, *, execute: bool, persist,
+                          new_uuid=lambda: str(uuid.uuid4())) -> dict:
+    """Only the exact actor's recorded account-scoped Blob Data Reader control."""
+    m = guard.m
+    if operation not in {"add", "remove"} or not m.actor:
+        raise SafetyError("Select add/remove for a recorded actor")
+    ensure_owned_before_mutation(guard)
+    account = guard.checked(guard.read("arm", m.storage_id + "?api-version=2023-05-01"))
+    if account.get("tags", {}).get("storm3168LabId") != m.lab_id:
+        raise SafetyError("Storage ownership tag mismatch")
+    verify_definition(guard, DATA_READER, "Storage Blob Data Reader")
+    matches = [r for r in data["role_assignments"] if r["role_definition_id"].rsplit("/", 1)[-1].lower() == DATA_READER]
+    if len(matches) > 1 or any(r["scope"].lower() != m.storage_id.lower() or r["principal_id"] != m.actor["service_principal_object_id"] for r in matches):
+        raise SafetyError("Data-reader control must be one exact actor/account assignment")
+    row = matches[0] if matches else None
+    if row:
+        verify_assignment(guard, row, allow_absent=True)
+    if operation == "add" and inventory(guard)["unexpected_potential_writer_paths"]:
+        raise SafetyError("Unexpected inherited/group permission path; reconcile before adding data control")
+    if not execute:
+        return {"status": "planned", "operation": operation, "scope": "exact storage account", "cloud_mutations": False}
+    if operation == "remove" and row is None:
+        raise SafetyError("No exact recorded data-reader assignment; refusing discovery")
+    if row is None:
+        row = {"id": m.storage_id + "/providers/Microsoft.Authorization/roleAssignments/" + guid(new_uuid(), "assignment UUID"),
+               "principal_id": m.actor["service_principal_object_id"], "scope": m.storage_id,
+               "role_definition_id": role_definition_id(m, DATA_READER)}
+        data["role_assignments"].append(row)
+        persist(data)
+    exists = verify_assignment(guard, row, allow_absent=True)
+    if (operation == "add") == exists:
+        return {"status": "already_present" if exists else "already_absent", "cloud_mutations": False}
+    ensure_owned_before_mutation(guard)
+    if verify_assignment(guard, row, allow_absent=True) != exists:
+        raise SafetyError("Data-reader assignment changed before mutation")
+    body = {"properties": {"principalId": row["principal_id"], "roleDefinitionId": row["role_definition_id"], "principalType": "ServicePrincipal"}} if operation == "add" else None
+    response = guard.http.request("PUT" if operation == "add" else "DELETE", ARM + row["id"] + "?api-version=2022-04-01",
+                                  {"Authorization": "Bearer " + guard.operator.token("arm")}, body)
+    if response.transport_error or response.status not in {200, 201, 204}:
+        raise SafetyError("Data-reader change unconfirmed; exact recorded assignment retained")
+    if verify_assignment(guard, row, allow_absent=True) != (operation == "add"):
+        raise SafetyError("Data-reader postcondition is unconfirmed")
+    if operation == "remove":
+        data["role_assignments"].remove(row)
+        persist(data)
+    return {"status": "configuration_verified_baseline_required", "operation": operation, "cloud_mutations": True}
+
+
 def main(argv=None) -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--manifest", default="private/manifest.json")
     p.add_argument("--subscription", required=True)
     p.add_argument("--confirm-lab-id", required=True)
-    p.add_argument("--mode", choices=("direct", "group"), required=True)
+    selection = p.add_mutually_exclusive_group(required=True)
+    selection.add_argument("--mode", choices=("direct", "group"))
+    selection.add_argument("--data-reader-control", choices=("add", "remove"), help="Exact account-scoped actor Blob Data Reader; independent opt-in")
     p.add_argument("--execute", action="store_true")
     p.add_argument("--enable-actor", action="store_true", help="Explicitly enable only the recorded tenant SP; never reactivate the global app")
     args = p.parse_args(argv)
@@ -263,8 +322,14 @@ def main(argv=None) -> int:
         try:
             if args.execute:
                 record_access_settling(data, complete=False)
-            result = configure(data, guard, args.mode, execute=args.execute, enable_actor=args.enable_actor,
-                               persist=lambda value: save_manifest(path, value))
+            if args.data_reader_control:
+                if args.enable_actor:
+                    raise SafetyError("Data-reader control does not enable the actor")
+                result = configure_data_reader(data, guard, args.data_reader_control, execute=args.execute,
+                                               persist=lambda value: save_manifest(path, value))
+            else:
+                result = configure(data, guard, args.mode, execute=args.execute, enable_actor=args.enable_actor,
+                                   persist=lambda value: save_manifest(path, value))
             if args.execute:
                 settling = record_access_settling(data, complete=True)
                 result.update(ready_after_epoch=settling["ready_after_epoch"], minimum_settling_seconds=600)

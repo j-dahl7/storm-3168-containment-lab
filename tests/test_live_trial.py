@@ -23,13 +23,15 @@ KEY = "88888888-8888-4888-8888-888888888888"
 
 
 class LiveTrialProtocolTests(unittest.TestCase):
-    def exercise(self, *, action="sp-disable", capability="arm-tag-write", baseline_count=2, lost_creation_reply=False, cleanup_interrupt=False, post_interrupt=False):
+    def exercise(self, *, action="sp-disable", capability="arm-tag-write", baseline_count=2, lost_creation_reply=False, cleanup_interrupt=False, post_interrupt=False, executor_cleanup=True):
         (ROOT / "private").mkdir(exist_ok=True)
         with tempfile.TemporaryDirectory(dir=ROOT / "private") as temp:
             manifest_path = Path(temp) / "manifest.json"
             manifest = json.loads((ROOT / "config" / "manifest.example.json").read_text())
             manifest_path.write_text(json.dumps(manifest))
             state = {"credentials": [], "tokens": [], "responded": False, "token_calls": 0, "issued": []}
+            assignment_id = manifest["role_assignments"][0]["id"]
+            executor_target = response_target(Manifest.from_dict(manifest), "role-delete", assignment_id)
             created_run_dirs = []
             real_private_path = live_trial.private_path
 
@@ -94,10 +96,29 @@ class LiveTrialProtocolTests(unittest.TestCase):
                                                  "request_started_at": utc_now(), "acknowledged_at": utc_now(), "http_status": 204,
                                                  "status": "configuration_verified_capability_unproven", "postcondition_verified": True}) + "\n")
 
+            def executor(data, subscription, selected_assignment, output):
+                state['responded'] = True
+                state['manual_executor_calls'] = state.get('manual_executor_calls', 0) + 1
+                self.assertEqual(selected_assignment, assignment_id)
+                self.assertNotIn('secretText', data)
+                self.assertNotIn(state['issued'][0], json.dumps(data))
+                result = {"kind": "response", "action": "role-delete", "executed": True, "target": executor_target,
+                          "request_started_at": utc_now(), "acknowledged_at": utc_now(), "http_status": None,
+                          "status": "configuration_verified_capability_unproven" if executor_cleanup else "indeterminate",
+                          "postcondition_verified": executor_cleanup, "measurement_limit": "controller gap",
+                          "executor_action": {"clock_source": "service_action_metadata"},
+                          "executor": {"cleanup_verified": executor_cleanup, "run_id": "fixture-run", "response_outcome": "role_assignment_removed_access_unverified"}}
+                output.write_text(json.dumps(result) + '\n')
+                if not executor_cleanup:
+                    raise RuntimeError('Executor shutdown unverified')
+                return result
+
             argv = ["live_trial.py", "--manifest", str(manifest_path), "--subscription", SUB,
                     "--confirm-lab-id", LAB, "--action", action, "--capability", capability, "--duration", "20", "--execute", "--check-new-token"]
             if capability == "blob-read":
                 argv.extend(["--storage-baseline-state", str(Path(temp) / "storage.json")])
+            if action == "manual-executor":
+                argv.extend(["--role-assignment-id", assignment_id])
             failure = None
             with patch.object(sys, "argv", argv), patch.object(live_trial, "load_owned", return_value=(manifest_path, manifest)), \
                  patch.object(live_trial, "private_path", side_effect=isolated_private_path), \
@@ -105,6 +126,8 @@ class LiveTrialProtocolTests(unittest.TestCase):
                  patch.object(live_trial, "begin_trial"), patch.object(live_trial, "finish_trial") as finished, \
                  patch.object(live_trial, "assert_storage_window", return_value={"valid": True}) as prepared, \
                  patch.object(live_trial, "request", side_effect=request), patch.object(live_trial, "invoke_harness", side_effect=harness), \
+                 patch.object(live_trial.manual_executor_trial, "load_bound_state", return_value=(Path(temp) / "responder.json", {}, executor_target)), \
+                 patch.object(live_trial.manual_executor_trial, "invoke", side_effect=executor), \
                  patch.object(live_trial.subprocess, "run", return_value=SimpleNamespace(returncode=0, stdout="a" * 40)), \
                  contextlib.redirect_stdout(io.StringIO()):
                 try:
@@ -167,6 +190,24 @@ class LiveTrialProtocolTests(unittest.TestCase):
         self.assertEqual(receipt["frozen_token_metadata"]["aud"], "https://storage.azure.com/")
         self.assertEqual(receipt["separate_new_token_check"]["token_metadata"]["aud"], "https://storage.azure.com/")
         self.assertEqual(state["storage_checks"], 2)
+
+    def test_core09_keeps_one_probe_token_and_records_workflow_transport(self):
+        state, receipt, failure = self.exercise(action='manual-executor')
+        self.assertIsNone(failure)
+        self.assertEqual(state['manual_executor_calls'], 1)
+        self.assertEqual(state['tokens'], [state['issued'][0], state['issued'][0]])
+        self.assertEqual(receipt['action'], 'role-delete')
+        self.assertEqual(receipt['orchestration_action'], 'manual-executor')
+        self.assertEqual(receipt['response_transport'], 'guarded_logic_app')
+        self.assertIn('controller_observation_gap_seconds', receipt)
+        self.assertTrue(state['finish_cleanup_confirmed'])
+
+    def test_core09_unknown_workflow_cleanup_retains_trial_lease(self):
+        state, receipt, failure = self.exercise(action='manual-executor', executor_cleanup=False)
+        self.assertIn('shutdown unverified', failure)
+        self.assertFalse(state['finish_cleanup_confirmed'])
+        self.assertTrue(receipt['credential_removed'])
+        self.assertFalse(receipt['executor_receipt']['cleanup_verified'])
 
 
 if __name__ == "__main__":

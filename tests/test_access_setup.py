@@ -30,10 +30,13 @@ class AccessHTTP(FakeHTTP):
 
     def request(self, method, url, headers=None, body=None):
         m = self.m
+        if url.startswith(ARM + m.storage_id + "?") and method == "GET":
+            self.calls.append((method, url, headers or {}, body))
+            return response(data={"id": m.storage_id, "name": m.storage_account, "tags": {"storm3168LabId": LAB}})
         if "/roleDefinitions/" in url:
             self.calls.append((method, url, headers or {}, body))
             rid = url.removeprefix(ARM).split("?", 1)[0]
-            name = "Reader" if rid.endswith(access.READER) else "Storage Account Contributor"
+            name = "Reader" if rid.endswith(access.READER) else "Storage Blob Data Reader" if rid.endswith(access.DATA_READER) else "Storage Account Contributor"
             return response(data={"id": rid, "properties": {"roleName": name}})
         if "/transitiveMemberOf?" in url:
             self.calls.append((method, url, headers or {}, body))
@@ -51,7 +54,7 @@ class AccessHTTP(FakeHTTP):
             self.calls.append((method, url, headers or {}, body))
             rid = url.removeprefix(ARM).split("?", 1)[0]
             if method == "PUT":
-                self.assignments[rid] = {"id": rid, "properties": dict(body["properties"], scope=m.rg_id)}
+                self.assignments[rid] = {"id": rid, "properties": dict(body["properties"], scope=rid.rsplit("/providers/Microsoft.Authorization/roleAssignments/", 1)[0])}
                 return response(201, self.assignments[rid])
             if method == "DELETE":
                 self.assignments.pop(rid, None)
@@ -165,6 +168,42 @@ class AccessSetupTests(unittest.TestCase):
             access.configure(data, guard, "direct", execute=True, enable_actor=False, persist=persist)
         self.assertFalse(http.mutations)
         self.assertTrue(saved)  # Intended ID retained for reconciliation.
+
+    def test_data_reader_is_recorded_before_exact_account_scoped_creation(self):
+        data, m, http, guard, persist, saved = self.setup_case()
+        result = access.configure_data_reader(data, guard, "add", execute=True, persist=persist)
+        row = next(r for r in data["role_assignments"] if r["role_definition_id"].endswith(access.DATA_READER))
+        self.assertEqual(row["scope"], m.storage_id)
+        self.assertEqual(row["principal_id"], SP)
+        self.assertIn(row, saved[0]["role_assignments"])
+        self.assertEqual(len(http.mutations), 1)
+        self.assertEqual(http.mutations[0][0], "PUT")
+
+    def test_exact_recorded_data_reader_is_not_an_unexpected_writer(self):
+        data, m, http, guard, persist, saved = self.setup_case()
+        access.configure_data_reader(data, guard, "add", execute=True, persist=persist)
+        m = Manifest.from_dict(data)
+        guard = Guard(m, http, Operator())
+        self.assertEqual(access.inventory(guard)["unexpected_potential_writer_paths"], [])
+
+    def test_data_reader_at_rg_or_for_group_is_rejected(self):
+        for scope_kind, principal in [("rg", SP), ("account", GROUP)]:
+            data, m, http, guard, persist, saved = self.setup_case()
+            scope = m.rg_id if scope_kind == "rg" else m.storage_id
+            data["role_assignments"].append({"id": scope + "/providers/Microsoft.Authorization/roleAssignments/11111111-2222-4333-8444-555555555555", "principal_id": principal,
+                "scope": scope, "role_definition_id": access.role_definition_id(m, access.DATA_READER)})
+            with self.assertRaises(SafetyError):
+                access.configure_data_reader(data, guard, "add", execute=True, persist=persist)
+            self.assertFalse(http.mutations)
+
+    def test_unrecorded_data_reader_is_not_adopted(self):
+        data, m, http, guard, persist, saved = self.setup_case()
+        http.unexpected = {"id": m.storage_id + "/providers/Microsoft.Authorization/roleAssignments/unrecorded", "properties": {
+            "principalId": SP, "scope": m.storage_id, "roleDefinitionId": access.role_definition_id(m, access.DATA_READER)}}
+        self.assertTrue(access.inventory(guard)["unexpected_potential_writer_paths"])
+        with self.assertRaises(SafetyError):
+            access.configure_data_reader(data, guard, "add", execute=True, persist=persist)
+        self.assertFalse(http.mutations)
 
 
 if __name__ == "__main__":

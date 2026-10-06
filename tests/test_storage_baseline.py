@@ -163,7 +163,7 @@ class BaselineSafetyTests(unittest.TestCase):
         def local_save(path, obj):
             Path(path).parent.mkdir(parents=True, exist_ok=True)
             Path(path).write_text(json.dumps(obj))
-        with patch.object(baseline, "ROOT", Path(directory)), patch.object(baseline, "private_path", side_effect=Path), patch.object(baseline, "save", side_effect=local_save), patch.object(baseline, "account", return_value={"properties": closed()}), patch.object(baseline, "container_preflight", return_value=("exact", True)), patch.object(baseline, "patch_settings"), patch.object(baseline, "create_container"), patch.object(baseline, "seed_credential", return_value="secret-not-for-state"), patch.object(baseline, "blob_request", side_effect=replies), patch.object(baseline.uuid, "uuid4", return_value=NONCE), patch.object(baseline, "restore", return_value={"status": "verified", "settings_restored": True}) as restore:
+        with patch.object(baseline, "ROOT", Path(directory)), patch.object(baseline, "private_path", side_effect=Path), patch.object(baseline, "save", side_effect=local_save), patch.object(baseline, "account", return_value={"properties": closed()}), patch.object(baseline, "container_preflight", return_value=("exact", True)), patch.object(baseline, "patch_settings"), patch.object(baseline, "create_container"), patch.object(baseline, "wait_for_firewall", return_value={"readiness": "authorized_not_found"}), patch.object(baseline, "seed_credential", return_value="secret-not-for-state"), patch.object(baseline, "blob_request", side_effect=replies), patch.object(baseline.uuid, "uuid4", return_value=NONCE), patch.object(baseline, "restore", return_value={"status": "verified", "settings_restored": True}) as restore:
             sleeper = Mock(side_effect=KeyboardInterrupt()) if interrupt else Mock()
             path = Path(directory) / "state.json"
             error = None
@@ -227,6 +227,26 @@ class BaselineSafetyTests(unittest.TestCase):
         self.assertTrue(result["settings_restored"])
         self.assertEqual(attempt.call_count, 3)
         self.assertEqual([x.args[0] for x in sleep.call_args_list], [2, 4])
+
+    def test_firewall_readiness_waits_only_with_gets(self):
+        responses = [Response(403, headers={"x-ms-error-code": "AuthorizationFailure"}),
+                     Response(404, headers={"x-ms-error-code": "ContainerNotFound"})]
+        with patch.object(baseline, "blob_request", side_effect=responses) as read:
+            result = baseline.wait_for_firewall(Mock(m=M), "baseline-" + NONCE + ".txt", NONCE, "shared-key", "synthetic", sleeper=Mock())
+        self.assertEqual(result["attempts"], 2)
+        self.assertTrue(all(call.args[1] == "GET" for call in read.call_args_list))
+
+    def test_firewall_readiness_does_not_retry_bad_permission(self):
+        with patch.object(baseline, "blob_request", return_value=Response(403, headers={"x-ms-error-code": "AuthorizationPermissionMismatch"})) as read:
+            with self.assertRaises(SafetyError):
+                baseline.wait_for_firewall(Mock(m=M), "baseline-" + NONCE + ".txt", NONCE, "bearer", "synthetic", sleeper=Mock())
+        self.assertEqual(read.call_count, 1)
+
+    def test_firewall_readiness_is_bounded(self):
+        with patch.object(baseline, "blob_request", return_value=Response(503)) as read:
+            with self.assertRaises(SafetyError):
+                baseline.wait_for_firewall(Mock(m=M), "baseline-" + NONCE + ".txt", NONCE, "bearer", "synthetic", sleeper=Mock())
+        self.assertEqual(read.call_count, 19)
 
     def test_restore_retry_budget_is_bounded_and_never_claims_success(self):
         receipt = state()

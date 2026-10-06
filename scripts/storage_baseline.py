@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from email.utils import formatdate
 import hashlib
 import hmac
+import http.client
 import ipaddress
 import json
 import os
@@ -19,7 +20,7 @@ import uuid
 
 from lab_support import ROOT, az, guid, private_path, save
 from telemetry import load_manifest
-from stormlab.core import ARM, AzureCLI, Guard, HTTP, Manifest, Response, SafetyError, claims_from_token
+from stormlab.core import ARM, AzureCLI, Guard, HTTP, Manifest, Response, SafetyError, claims_from_token, service_code
 
 API = "?api-version=2023-05-01"
 
@@ -214,13 +215,37 @@ def storage_request(guard: Guard, method: str, path: str, headers: dict,
         result = guard.http.opener.open(request, timeout=20)
     except urllib.error.HTTPError as exc:
         result = exc
-    except (urllib.error.URLError, OSError, TimeoutError):
+    except (urllib.error.URLError, OSError, TimeoutError, ValueError, UnicodeError, http.client.HTTPException):
         return Response(0, transport_error=True)
-    with result:
-        payload = result.read(8193)
-        if len(payload) > 8192:
-            return Response(result.code, transport_error=True)
-        return Response(result.code, payload, {k.lower(): v for k, v in result.headers.items()})
+    try:
+        with result:
+            payload = result.read(8193)
+            if len(payload) > 8192:
+                return Response(result.code, transport_error=True)
+            return Response(result.code, payload, {k.lower(): v for k, v in result.headers.items()})
+    except (OSError, TimeoutError, ValueError, UnicodeError, http.client.HTTPException):
+        return Response(0, transport_error=True)
+
+
+def wait_for_firewall(guard: Guard, name: str, nonce: str, mode: str, credential: str,
+                      *, sleeper=time.sleep, clock=time.monotonic) -> dict:
+    """Read-only readiness check against the future unique nonce path, max 90s.
+
+    A verified not-found response establishes that the request passed the old
+    restrictive firewall. Upload remains create-only and is never retried.
+    """
+    deadline = clock() + 90
+    for attempt in range(19):
+        observed = blob_request(guard, "GET", name, nonce, mode, credential)
+        code = service_code(observed)
+        if observed.status == 404 and code in {"BlobNotFound", "ContainerNotFound", "ResourceNotFound"} and not observed.transport_error:
+            return {"readiness": "authorized_not_found", "attempts": attempt + 1}
+        retryable = observed.transport_error or observed.status in {0, 429} or observed.status >= 500 or (observed.status == 403 and
+                    (code == "AuthorizationFailure" or (mode == "shared-key" and code == "KeyBasedAuthenticationNotPermitted")))
+        if not retryable or clock() >= deadline or attempt == 18:
+            raise SafetyError("Storage firewall readiness unconfirmed; no canary write attempted")
+        sleeper(min(5, max(0, deadline - clock())))
+    raise SafetyError("Storage readiness deadline reached")
 
 
 def restore(guard: Guard, state: dict, execute: bool) -> dict:
@@ -283,7 +308,7 @@ def restore_with_retry(guard: Guard, state: dict, *, sleeper=time.sleep, persist
 
 def prepare(data: dict, guard: Guard, ip: str, mode: str, enable_shared_key: bool,
             hold_seconds: int, state_path: Path, execute: bool, *, sleeper=time.sleep,
-            announce=lambda x: print(json.dumps(x), flush=True)) -> dict:
+            announce=lambda x: print(json.dumps(x), flush=True), during_hold=None) -> dict:
     if type(hold_seconds) is not int or not 60 <= hold_seconds <= 7800:
         raise SafetyError("Baseline hold must be 60..7800 seconds")
     ip = client_ip(ip)
@@ -324,6 +349,8 @@ def prepare(data: dict, guard: Guard, ip: str, mode: str, enable_shared_key: boo
         state["status"] = "network_prepared"
         save(state_path, state)
         credential = seed_credential(guard, mode)
+        state["firewall_readiness"] = wait_for_firewall(guard, name, nonce, mode, credential, sleeper=sleeper)
+        save(state_path, state)
         if absent:
             create_container(guard, container_path, mode, credential)
             state["container_created"] = True
@@ -349,6 +376,11 @@ def prepare(data: dict, guard: Guard, ip: str, mode: str, enable_shared_key: boo
                   "hold_seconds": hold_seconds, "actor_access_verified": False,
                   "restoration_due_at": state["restoration_due_at"],
                   "credentials_exported": False, "restore_on_exit": True})
+        if during_hold is not None:
+            result = during_hold(modified, state)
+            if datetime.now(timezone.utc) >= hold_started_at + timedelta(seconds=hold_seconds):
+                raise SafetyError("Embedded trial exceeded its declared storage hold; results are incomplete")
+            return result
         # Other terminal/process performs the selected frozen-credential trial.
         # This process never refreshes or exports that trial credential.
         for _ in range(hold_seconds):
