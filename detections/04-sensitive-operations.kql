@@ -10,6 +10,7 @@ let ConfiguredLabId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 let LabGroup = tolower(trim_end(@"/+", LabResourceGroupId));
 let LabPrefix = strcat(LabGroup, "/");
 AzureActivity
+| extend ResourceId = coalesce(tostring(column_ifexists("_ResourceId", "")), tostring(column_ifexists("ResourceId", "")))
 | where TimeGenerated >= ago(1d)
 | extend ActorOid = tolower(coalesce(
     tostring(Claims_d["http://schemas.microsoft.com/identity/claims/objectidentifier"]),

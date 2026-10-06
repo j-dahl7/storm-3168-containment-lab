@@ -11,7 +11,10 @@
     "synthetic-event-014",
     "synthetic-event-016",
     "synthetic-event-017",
-    "synthetic-event-018"
+    "synthetic-event-018",
+    "synthetic-event-019",
+    "synthetic-event-020",
+    "synthetic-event-022"
   ],
   "notes": [
     "SyntheticIngestedAt exists only in this fixture and replay; it is not a provider schema field.",
@@ -19,7 +22,8 @@
     "No fixture row is to be uploaded into AzureActivity or AADServicePrincipalSignInLogs.",
     "ExpectedMatch is the expected predicate result before event-ID deduplication; not a measured provider response.",
     "The automation candidate is successful-only and finally selects one priority event. This fixture checks eligibility before candidate selection; denied events remain hunting-only.",
-    "The generated replay evaluates the complete current production pipeline per fixture and across the full batch; only the table and clock sources are substituted."
+    "The generated replay evaluates the complete current production pipeline per fixture and across the full batch; only the table and clock sources are substituted.",
+    "_ResourceId is authoritative when nonempty; legacy ResourceId is only a fallback. A foreign or malformed standard ID cannot match through a legacy canary ID."
   ],
   "expected_selected_event_id": "synthetic-event-008"
 }

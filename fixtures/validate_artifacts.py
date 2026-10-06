@@ -10,6 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 from render_kql_replay import build as build_actual_replay
+from telemetry import canonical_resource_id
 
 
 def read_json(path: Path):
@@ -43,7 +44,10 @@ def main():
         claims = row["Claims_d"]
         oid = (claims.get("http://schemas.microsoft.com/identity/claims/objectidentifier")
                or claims.get("oid") or row["Caller"]).lower()
-        resource = row["ResourceId"].lower()
+        selected_resource = canonical_resource_id(row)
+        if "ExpectedCanonicalResourceId" in row:
+            assert selected_resource == row["ExpectedCanonicalResourceId"], row["CaseId"]
+        resource = selected_resource.lower()
         arrival = (utc(row["SyntheticIngestedAt"])
                    or utc(row["EventSubmissionTimestamp"]) or utc(row["TimeGenerated"]))
         matched = bool(

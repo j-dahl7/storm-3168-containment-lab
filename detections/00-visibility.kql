@@ -7,6 +7,7 @@ let LabPrefix = strcat(LabGroup, "/");
 // No actor filter here: setup/operator events help establish export health.
 // Scope to the exact lab group; no rows means unknown until controlled writes and export are checked.
 AzureActivity
+| extend ResourceId = coalesce(tostring(column_ifexists("_ResourceId", "")), tostring(column_ifexists("ResourceId", "")))
 | where TimeGenerated > ago(24h)
 | extend NormalizedResourceId = tolower(ResourceId)
 | where NormalizedResourceId == LabGroup or NormalizedResourceId startswith LabPrefix

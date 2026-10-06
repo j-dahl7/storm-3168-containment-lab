@@ -21,7 +21,8 @@
       "EventDataId": "synthetic-event-001",
       "OperationId": "synthetic-operation-001",
       "CaseId": "sensitive-success",
-      "ExpectedMatch": true
+      "ExpectedMatch": true,
+      "_ResourceId": ""
     },
     {
       "TimeGenerated": "2026-10-01T11:58:00Z",
@@ -40,7 +41,8 @@
       "EventDataId": "synthetic-event-002",
       "OperationId": "synthetic-operation-002",
       "CaseId": "started-not-terminal",
-      "ExpectedMatch": false
+      "ExpectedMatch": false,
+      "_ResourceId": ""
     },
     {
       "TimeGenerated": "2026-10-01T11:58:00Z",
@@ -59,7 +61,8 @@
       "EventDataId": "synthetic-event-003",
       "OperationId": "synthetic-operation-003",
       "CaseId": "foreign-actor",
-      "ExpectedMatch": false
+      "ExpectedMatch": false,
+      "_ResourceId": ""
     },
     {
       "TimeGenerated": "2026-10-01T11:58:00Z",
@@ -78,7 +81,8 @@
       "EventDataId": "synthetic-event-004",
       "OperationId": "synthetic-operation-004",
       "CaseId": "sibling-group-prefix-collision",
-      "ExpectedMatch": false
+      "ExpectedMatch": false,
+      "_ResourceId": ""
     },
     {
       "TimeGenerated": "2026-10-01T11:58:00Z",
@@ -95,7 +99,8 @@
       "EventDataId": "synthetic-event-005",
       "OperationId": "synthetic-operation-005",
       "CaseId": "caller-fallback",
-      "ExpectedMatch": true
+      "ExpectedMatch": true,
+      "_ResourceId": ""
     },
     {
       "TimeGenerated": "2026-10-01T11:58:00Z",
@@ -114,7 +119,8 @@
       "EventDataId": "synthetic-event-006",
       "OperationId": "synthetic-operation-006",
       "CaseId": "appid-is-not-object-id",
-      "ExpectedMatch": false
+      "ExpectedMatch": false,
+      "_ResourceId": ""
     },
     {
       "TimeGenerated": "2026-10-01T11:58:00Z",
@@ -133,7 +139,8 @@
       "EventDataId": "synthetic-event-007",
       "OperationId": "synthetic-operation-007",
       "CaseId": "failed-lock-delete-hunting-only",
-      "ExpectedMatch": false
+      "ExpectedMatch": false,
+      "_ResourceId": ""
     },
     {
       "TimeGenerated": "2026-10-01T10:00:00Z",
@@ -152,7 +159,8 @@
       "EventDataId": "synthetic-event-008",
       "OperationId": "synthetic-operation-008",
       "CaseId": "late-arrival-within-lookback",
-      "ExpectedMatch": true
+      "ExpectedMatch": true,
+      "_ResourceId": ""
     },
     {
       "TimeGenerated": "2026-09-29T10:00:00Z",
@@ -171,7 +179,8 @@
       "EventDataId": "synthetic-event-009",
       "OperationId": "synthetic-operation-009",
       "CaseId": "older-than-source-lookback",
-      "ExpectedMatch": false
+      "ExpectedMatch": false,
+      "_ResourceId": ""
     },
     {
       "TimeGenerated": "2026-10-01T11:58:00Z",
@@ -190,7 +199,8 @@
       "EventDataId": "synthetic-event-010",
       "OperationId": "synthetic-operation-010",
       "CaseId": "case-normalized-scope",
-      "ExpectedMatch": true
+      "ExpectedMatch": true,
+      "_ResourceId": ""
     },
     {
       "TimeGenerated": "2026-10-01T11:58:00Z",
@@ -209,7 +219,8 @@
       "EventDataId": "synthetic-event-011",
       "OperationId": "synthetic-operation-011",
       "CaseId": "ordinary-write-not-sensitive",
-      "ExpectedMatch": false
+      "ExpectedMatch": false,
+      "_ResourceId": ""
     },
     {
       "TimeGenerated": "2026-10-01T11:38:00Z",
@@ -228,7 +239,8 @@
       "EventDataId": "synthetic-event-012",
       "OperationId": "synthetic-operation-012",
       "CaseId": "old-arrival",
-      "ExpectedMatch": false
+      "ExpectedMatch": false,
+      "_ResourceId": ""
     },
     {
       "TimeGenerated": "2026-10-01T11:58:00Z",
@@ -247,7 +259,8 @@
       "EventDataId": "",
       "OperationId": "synthetic-operation-013",
       "CaseId": "missing-event-id",
-      "ExpectedMatch": false
+      "ExpectedMatch": false,
+      "_ResourceId": ""
     },
     {
       "TimeGenerated": "2026-10-01T11:58:00Z",
@@ -266,7 +279,8 @@
       "EventDataId": "synthetic-event-014",
       "OperationId": "synthetic-operation-014",
       "CaseId": "missing-ingestion-fallback-submission",
-      "ExpectedMatch": true
+      "ExpectedMatch": true,
+      "_ResourceId": ""
     },
     {
       "TimeGenerated": "2026-10-01T11:58:00Z",
@@ -285,7 +299,8 @@
       "EventDataId": "synthetic-event-001",
       "OperationId": "synthetic-operation-001",
       "CaseId": "duplicate-event-later-ingestion",
-      "ExpectedMatch": true
+      "ExpectedMatch": true,
+      "_ResourceId": ""
     },
     {
       "TimeGenerated": "2026-10-01T11:58:00Z",
@@ -304,7 +319,8 @@
       "EventDataId": "synthetic-event-016",
       "OperationId": "synthetic-operation-016",
       "CaseId": "mint-account-sas",
-      "ExpectedMatch": true
+      "ExpectedMatch": true,
+      "_ResourceId": ""
     },
     {
       "TimeGenerated": "2026-10-01T11:58:00Z",
@@ -323,7 +339,8 @@
       "EventDataId": "synthetic-event-017",
       "OperationId": "synthetic-operation-017",
       "CaseId": "mint-service-sas",
-      "ExpectedMatch": true
+      "ExpectedMatch": true,
+      "_ResourceId": ""
     },
     {
       "TimeGenerated": "2026-10-01T11:58:00Z",
@@ -342,7 +359,155 @@
       "EventDataId": "synthetic-event-018",
       "OperationId": "synthetic-operation-018",
       "CaseId": "short-oid-fallback",
-      "ExpectedMatch": true
+      "ExpectedMatch": true,
+      "_ResourceId": ""
+    },
+    {
+      "TimeGenerated": "2026-10-01T11:58:00Z",
+      "EventSubmissionTimestamp": "2026-10-01T11:59:00Z",
+      "SyntheticIngestedAt": "2026-10-01T11:59:30Z",
+      "Caller": "22222222-2222-4222-8222-222222222222",
+      "Claims_d": {
+        "http://schemas.microsoft.com/identity/claims/objectidentifier": "22222222-2222-4222-8222-222222222222"
+      },
+      "CallerIpAddress": "192.0.2.10",
+      "ResourceId": "",
+      "OperationNameValue": "MICROSOFT.STORAGE/STORAGEACCOUNTS/LISTKEYS/ACTION",
+      "ActivityStatusValue": "Success",
+      "ActivitySubstatusValue": "OK",
+      "CorrelationId": "55555555-5555-4555-8555-555555555555",
+      "EventDataId": "synthetic-event-019",
+      "OperationId": "synthetic-operation-019",
+      "CaseId": "standard-resource-id-empty-legacy",
+      "ExpectedMatch": true,
+      "_ResourceId": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary",
+      "ExpectedCanonicalResourceId": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary"
+    },
+    {
+      "TimeGenerated": "2026-10-01T11:58:00Z",
+      "EventSubmissionTimestamp": "2026-10-01T11:59:00Z",
+      "SyntheticIngestedAt": "2026-10-01T11:59:30Z",
+      "Caller": "22222222-2222-4222-8222-222222222222",
+      "Claims_d": {
+        "http://schemas.microsoft.com/identity/claims/objectidentifier": "22222222-2222-4222-8222-222222222222"
+      },
+      "CallerIpAddress": "192.0.2.10",
+      "ResourceId": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary",
+      "OperationNameValue": "MICROSOFT.STORAGE/STORAGEACCOUNTS/LISTKEYS/ACTION",
+      "ActivityStatusValue": "Success",
+      "ActivitySubstatusValue": "OK",
+      "CorrelationId": "55555555-5555-4555-8555-555555555555",
+      "EventDataId": "synthetic-event-020",
+      "OperationId": "synthetic-operation-020",
+      "CaseId": "legacy-resource-id-fallback",
+      "ExpectedMatch": true,
+      "_ResourceId": "",
+      "ExpectedCanonicalResourceId": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary"
+    },
+    {
+      "TimeGenerated": "2026-10-01T11:58:00Z",
+      "EventSubmissionTimestamp": "2026-10-01T11:59:00Z",
+      "SyntheticIngestedAt": "2026-10-01T11:59:30Z",
+      "Caller": "22222222-2222-4222-8222-222222222222",
+      "Claims_d": {
+        "http://schemas.microsoft.com/identity/claims/objectidentifier": "22222222-2222-4222-8222-222222222222"
+      },
+      "CallerIpAddress": "192.0.2.10",
+      "ResourceId": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary",
+      "OperationNameValue": "MICROSOFT.STORAGE/STORAGEACCOUNTS/LISTKEYS/ACTION",
+      "ActivityStatusValue": "Success",
+      "ActivitySubstatusValue": "OK",
+      "CorrelationId": "55555555-5555-4555-8555-555555555555",
+      "EventDataId": "synthetic-event-021",
+      "OperationId": "synthetic-operation-021",
+      "CaseId": "foreign-standard-id-cannot-fallback",
+      "ExpectedMatch": false,
+      "_ResourceId": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-foreign/providers/Microsoft.Storage/storageAccounts/storm3168canary",
+      "ExpectedCanonicalResourceId": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-foreign/providers/Microsoft.Storage/storageAccounts/storm3168canary"
+    },
+    {
+      "TimeGenerated": "2026-10-01T11:58:00Z",
+      "EventSubmissionTimestamp": "2026-10-01T11:59:00Z",
+      "SyntheticIngestedAt": "2026-10-01T11:59:30Z",
+      "Caller": "22222222-2222-4222-8222-222222222222",
+      "Claims_d": {
+        "http://schemas.microsoft.com/identity/claims/objectidentifier": "22222222-2222-4222-8222-222222222222"
+      },
+      "CallerIpAddress": "192.0.2.10",
+      "ResourceId": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-foreign/providers/Microsoft.Storage/storageAccounts/storm3168canary",
+      "OperationNameValue": "MICROSOFT.STORAGE/STORAGEACCOUNTS/LISTKEYS/ACTION",
+      "ActivityStatusValue": "Success",
+      "ActivitySubstatusValue": "OK",
+      "CorrelationId": "55555555-5555-4555-8555-555555555555",
+      "EventDataId": "synthetic-event-022",
+      "OperationId": "synthetic-operation-022",
+      "CaseId": "standard-id-wins-foreign-legacy",
+      "ExpectedMatch": true,
+      "_ResourceId": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary",
+      "ExpectedCanonicalResourceId": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary"
+    },
+    {
+      "TimeGenerated": "2026-10-01T11:58:00Z",
+      "EventSubmissionTimestamp": "2026-10-01T11:59:00Z",
+      "SyntheticIngestedAt": "2026-10-01T11:59:30Z",
+      "Caller": "22222222-2222-4222-8222-222222222222",
+      "Claims_d": {
+        "http://schemas.microsoft.com/identity/claims/objectidentifier": "22222222-2222-4222-8222-222222222222"
+      },
+      "CallerIpAddress": "192.0.2.10",
+      "ResourceId": "",
+      "OperationNameValue": "MICROSOFT.STORAGE/STORAGEACCOUNTS/LISTKEYS/ACTION",
+      "ActivityStatusValue": "Success",
+      "ActivitySubstatusValue": "OK",
+      "CorrelationId": "55555555-5555-4555-8555-555555555555",
+      "EventDataId": "synthetic-event-023",
+      "OperationId": "synthetic-operation-023",
+      "CaseId": "missing-both-resource-ids",
+      "ExpectedMatch": false,
+      "_ResourceId": "",
+      "ExpectedCanonicalResourceId": ""
+    },
+    {
+      "TimeGenerated": "2026-10-01T11:58:00Z",
+      "EventSubmissionTimestamp": "2026-10-01T11:59:00Z",
+      "SyntheticIngestedAt": "2026-10-01T11:59:30Z",
+      "Caller": "22222222-2222-4222-8222-222222222222",
+      "Claims_d": {
+        "http://schemas.microsoft.com/identity/claims/objectidentifier": "22222222-2222-4222-8222-222222222222"
+      },
+      "CallerIpAddress": "192.0.2.10",
+      "ResourceId": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary",
+      "OperationNameValue": "MICROSOFT.STORAGE/STORAGEACCOUNTS/LISTKEYS/ACTION",
+      "ActivityStatusValue": "Success",
+      "ActivitySubstatusValue": "OK",
+      "CorrelationId": "55555555-5555-4555-8555-555555555555",
+      "EventDataId": "synthetic-event-024",
+      "OperationId": "synthetic-operation-024",
+      "CaseId": "malformed-standard-id-cannot-fallback",
+      "ExpectedMatch": false,
+      "_ResourceId": " /subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary",
+      "ExpectedCanonicalResourceId": " /subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary"
+    },
+    {
+      "TimeGenerated": "2026-10-01T11:58:00Z",
+      "EventSubmissionTimestamp": "2026-10-01T11:59:00Z",
+      "SyntheticIngestedAt": "2026-10-01T11:59:30Z",
+      "Caller": "22222222-2222-4222-8222-222222222222",
+      "Claims_d": {
+        "http://schemas.microsoft.com/identity/claims/objectidentifier": "22222222-2222-4222-8222-222222222222"
+      },
+      "CallerIpAddress": "192.0.2.10",
+      "ResourceId": "",
+      "OperationNameValue": "MICROSOFT.STORAGE/STORAGEACCOUNTS/LISTKEYS/ACTION",
+      "ActivityStatusValue": "Start",
+      "ActivitySubstatusValue": "OK",
+      "CorrelationId": "55555555-5555-4555-8555-555555555555",
+      "EventDataId": "synthetic-event-025",
+      "OperationId": "synthetic-operation-025",
+      "CaseId": "standard-resource-id-start-not-terminal",
+      "ExpectedMatch": false,
+      "_ResourceId": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary",
+      "ExpectedCanonicalResourceId": "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary"
     }
   ]
 }

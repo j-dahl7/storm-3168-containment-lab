@@ -143,6 +143,35 @@ class TelemetryTests(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 telemetry.query_source(DATA, M, selection, "AzureActivity", START, END, 100)
 
+    def query_activity_rows(self, rows):
+        selection = {"resource_id": telemetry.workspace_id(M), "customer_id": CUSTOMER, "ownership_required": True, "subscription_id": SUB}
+        with patch.object(telemetry, "assert_owned"), patch.object(telemetry, "resolve_workspace", return_value=selection), patch.object(telemetry, "az", return_value=rows):
+            return telemetry.query_source(DATA, M, selection, "AzureActivity", START, END, 100)
+
+    def test_standard_resource_id_fills_empty_legacy_and_keeps_output_alias(self):
+        row = {**activity_row(), 'ResourceId': '', '_ResourceId': M.storage_id, 'ActivityStatusValue': 'Success'}
+        result = self.query_activity_rows([row])
+        self.assertEqual(result['rows'][0]['ResourceId'], M.storage_id)
+        self.assertNotIn('_ResourceId', result['rows'][0])
+        query = telemetry.activity_query(M, START, END, 100)
+        self.assertLess(query.index('column_ifexists("_ResourceId"'), query.index('where tolower(ResourceId)'))
+        self.assertIn('column_ifexists("ResourceId", "")', query)
+
+    def test_legacy_fallback_handles_absent_null_and_empty_standard_id(self):
+        for value in (None, ''):
+            result = self.query_activity_rows([{**activity_row(), '_ResourceId': value}])
+            self.assertEqual(result['rows'][0]['ResourceId'], M.storage_id)
+        self.assertEqual(self.query_activity_rows([activity_row()])['rows'][0]['ResourceId'], M.storage_id)
+
+    def test_foreign_or_malformed_standard_id_cannot_fall_back_to_canary(self):
+        for value in (M.rg_id + '-foreign/providers/Microsoft.Storage/storageAccounts/other', ' ' + M.storage_id, 42, []):
+            with self.subTest(value=value), self.assertRaises(RuntimeError):
+                self.query_activity_rows([{**activity_row(), '_ResourceId': value}])
+
+    def test_standard_canary_wins_over_conflicting_legacy_field(self):
+        result = self.query_activity_rows([{**activity_row(), '_ResourceId': M.storage_id, 'ResourceId': '/foreign'}])
+        self.assertEqual(result['rows'][0]['ResourceId'], M.storage_id)
+
     def test_result_envelope_malformed_and_partial_fail_closed(self):
         self.assertEqual(telemetry.result_rows({"tables": [{"name": "PrimaryResult", "columns": [{"name": "x"}], "rows": [[1]]}]}), [{"x": 1}])
         for value in ({}, {"error": {"message": "hidden"}, "tables": []}, {"tables": [{"name": "PrimaryResult", "columns": [{"name": "x"}], "rows": [[1, 2]]}]}, [42]):

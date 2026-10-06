@@ -91,6 +91,7 @@ def activity_query(manifest: Manifest, start: str, end: str, max_rows: int) -> s
     return (
         f'let Scope=tolower("{manifest.rg_id}");\n'
         "AzureActivity\n"
+        '| extend ResourceId = coalesce(tostring(column_ifexists("_ResourceId", "")), tostring(column_ifexists("ResourceId", "")))\n'
         f"| where TimeGenerated between (datetime({start}) .. datetime({end}))\n"
         "| where tolower(ResourceId) == Scope or tolower(ResourceId) startswith strcat(Scope, '/')\n"
         '| extend ActorObjectId=tolower(coalesce(tostring(Claims_d["http://schemas.microsoft.com/identity/claims/objectidentifier"]), tostring(Claims_d.oid), Caller)), WorkspaceIngestionTime=ingestion_time()\n'
@@ -100,6 +101,22 @@ def activity_query(manifest: Manifest, start: str, end: str, max_rows: int) -> s
         "| order by TimeGenerated asc\n"
         f"| take {max_rows + 1}"
     )
+
+
+def canonical_resource_id(row: dict) -> str:
+    """Standard _ResourceId wins; only an absent/null/empty value falls back.
+
+    Never OR both scope predicates: a foreign standard ID must not be rescued by
+    a conflicting legacy canary ID. Non-string identifiers are invalid metadata.
+    """
+    for name in ("_ResourceId", "ResourceId"):
+        value = row.get(name)
+        if value is None or value == "":
+            continue
+        if not isinstance(value, str):
+            raise RuntimeError("Provider resource identifier is not a string")
+        return value
+    return ""
 
 
 def signin_query(manifest: Manifest, start: str, end: str, max_rows: int) -> str:
@@ -193,10 +210,14 @@ def query_source(data: dict, manifest: Manifest, selection: dict, source: str,
         raise RuntimeError("Query response exceeds the declared row bound")
     for row in rows:
         if source == "AzureActivity":
-            resource = row.get("ResourceId")
+            resource = canonical_resource_id(row)
             scope = manifest.rg_id.lower()
             if not isinstance(resource, str) or not (resource.lower() == scope or resource.lower().startswith(scope + "/")):
                 raise RuntimeError("Query returned an out-of-scope resource")
+            # The query projects this alias; also enforce it if a provider/mock
+            # returns additional raw fields. The public evidence schema stays
+            # ResourceId, and sanitize_row drops the raw _ResourceId column.
+            row["ResourceId"] = resource
         else:
             principal, tenant = row.get("ServicePrincipalId"), row.get("AADTenantId")
             if (not isinstance(principal, str) or not isinstance(tenant, str)

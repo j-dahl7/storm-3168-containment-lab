@@ -12,7 +12,7 @@ import re
 ROOT = Path(__file__).resolve().parents[1]
 FIELDS = [("TimeGenerated", "datetime"), ("EventSubmissionTimestamp", "datetime"),
           ("SyntheticIngestedAt", "datetime"), ("Caller", "string"), ("Claims_d", "dynamic"),
-          ("ResourceId", "string"), ("OperationNameValue", "string"), ("ActivityStatusValue", "string"),
+          ("ResourceId", "string"), ("_ResourceId", "string"), ("OperationNameValue", "string"), ("ActivityStatusValue", "string"),
           ("EventDataId", "string"), ("CallerIpAddress", "string"), ("ActivitySubstatusValue", "string"),
           ("CorrelationId", "string"), ("OperationId", "string")]
 

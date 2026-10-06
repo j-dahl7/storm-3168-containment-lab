@@ -9,6 +9,7 @@ let LabPrefix = strcat(LabGroup, "/");
 // Fixed 10-minute buckets have boundary effects; overlapping scheduled windows can repeat results.
 let MinimumOperations = 3;
 AzureActivity
+| extend ResourceId = coalesce(tostring(column_ifexists("_ResourceId", "")), tostring(column_ifexists("ResourceId", "")))
 | where TimeGenerated > ago(30m)
 | extend ActorOid = tolower(coalesce(
     tostring(Claims_d["http://schemas.microsoft.com/identity/claims/objectidentifier"]),

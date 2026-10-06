@@ -6,6 +6,7 @@ let LabGroup = tolower(trim_end(@"/+", LabResourceGroupId));
 let LabPrefix = strcat(LabGroup, "/");
 // Do not infer resource access from these delivery delays.
 AzureActivity
+| extend ResourceId = coalesce(tostring(column_ifexists("_ResourceId", "")), tostring(column_ifexists("ResourceId", "")))
 | where TimeGenerated > ago(24h)
 | extend ActorOid = tolower(coalesce(
     tostring(Claims_d["http://schemas.microsoft.com/identity/claims/objectidentifier"]),

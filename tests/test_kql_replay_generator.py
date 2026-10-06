@@ -11,13 +11,18 @@ sys.path.insert(0, str(ROOT / "scripts"))
 from render_kql_replay import build
 
 
+def replay_case_count():
+    fixture = json.loads((ROOT / "fixtures/azureactivity.synthetic.json").read_text(encoding="utf-8"))
+    return len(fixture["events"]) + 1
+
+
 class ReplayGeneratorTests(unittest.TestCase):
     def test_union_receives_explicit_zero_argument_views_not_function_legs(self):
         query = build()
         union = query.split("\nunion\n", 1)[1].split("\n| project", 1)[0]
         names = [name.strip() for name in union.split(",")]
-        self.assertEqual(len(names), 19)
-        self.assertEqual(len(set(names)), 19)
+        self.assertEqual(len(names), replay_case_count())
+        self.assertEqual(len(set(names)), replay_case_count())
         for name in names:
             self.assertRegex(name, r"^Replay(?:Case\d{3}|FullPipeline)$")
             self.assertIn("let " + name + "=view () {\n", query)
@@ -31,7 +36,7 @@ class ReplayGeneratorTests(unittest.TestCase):
         actual = source.split("AzureActivity\n", 1)[1]
         actual = actual.replace("ingestion_time()", "SyntheticIngestedAt").replace("now()", "ReferenceTime")
         actual = re.sub(r"ago\((\d+[dhms])\)", r"(ReferenceTime - \1)", actual).rstrip()
-        self.assertEqual(build().count(actual), 19)
+        self.assertEqual(build().count(actual), replay_case_count())
 
     def test_every_fixture_and_batch_selection_remain_asserted(self):
         fixture = json.loads((ROOT / "fixtures/azureactivity.synthetic.json").read_text(encoding="utf-8"))
@@ -52,7 +57,7 @@ class ReplayGeneratorTests(unittest.TestCase):
             (root / "detections/04-sensitive-operations.kql").write_text(source.replace("AzureActivity\n", "AzureActivity\n" + marker + "\n"), encoding="utf-8")
             for name in ("azureactivity.synthetic.json", "expected-cases.json"):
                 (root / "fixtures" / name).write_bytes((ROOT / "fixtures" / name).read_bytes())
-            self.assertEqual(build(root).count(marker), 19)
+            self.assertEqual(build(root).count(marker), replay_case_count())
 
     def test_committed_generated_replay_matches_generator(self):
         self.assertEqual((ROOT / "detections/replay-sensitive-operations.kql").read_text(encoding="utf-8"), build())
@@ -64,7 +69,23 @@ class ReplayGeneratorTests(unittest.TestCase):
         self.assertNotIn('"yyyy-MM-ddTHH:mm:ss.fffffffZ"', source)
         template = json.loads((ROOT / "detections/sentinel-rule.arm.json").read_text(encoding="utf-8"))
         self.assertEqual(template["variables"]["queryBody"], "AzureActivity\n" + source.split("AzureActivity\n", 1)[1])
-        self.assertEqual(build().count(expected), 19)
+        self.assertEqual(build().count(expected), replay_case_count())
+
+    def test_standard_resource_id_column_and_real_shape_conflicts_are_replayed(self):
+        fixture = json.loads((ROOT / "fixtures/azureactivity.synthetic.json").read_text(encoding="utf-8"))
+        rows = {row['CaseId']: row for row in fixture['events']}
+        query = build()
+        self.assertIn('ResourceId:string, _ResourceId:string', query)
+        normalization = 'coalesce(tostring(column_ifexists("_ResourceId", "")), tostring(column_ifexists("ResourceId", "")))'
+        self.assertEqual(query.count(normalization), replay_case_count())
+        live_shape = rows['standard-resource-id-empty-legacy']
+        self.assertEqual(live_shape['ResourceId'], '')
+        self.assertEqual(live_shape['ActivityStatusValue'], 'Success')
+        self.assertTrue(live_shape['ExpectedMatch'])
+        self.assertFalse(rows['foreign-standard-id-cannot-fallback']['ExpectedMatch'])
+        self.assertFalse(rows['malformed-standard-id-cannot-fallback']['ExpectedMatch'])
+        self.assertTrue(rows['legacy-resource-id-fallback']['ExpectedMatch'])
+        self.assertFalse(rows['standard-resource-id-start-not-terminal']['ExpectedMatch'])
 
 
 if __name__ == "__main__":

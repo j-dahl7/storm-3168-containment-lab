@@ -6,29 +6,37 @@ let ActorObjectId = "22222222-2222-4222-8222-222222222222";
 let ConfiguredLabId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 let LabGroup = tolower(trim_end(@"/+", LabResourceGroupId));
 let LabPrefix = strcat(LabGroup, "/");
-let SyntheticInput=datatable(CaseId:string, ExpectedMatch:bool, TimeGenerated:datetime, EventSubmissionTimestamp:datetime, SyntheticIngestedAt:datetime, Caller:string, Claims_d:dynamic, ResourceId:string, OperationNameValue:string, ActivityStatusValue:string, EventDataId:string, CallerIpAddress:string, ActivitySubstatusValue:string, CorrelationId:string, OperationId:string)[
-    "sensitive-success", true, datetime(2026-10-01T11:58:00Z), datetime(2026-10-01T11:59:00Z), datetime(2026-10-01T11:59:30Z), "22222222-2222-4222-8222-222222222222", dynamic({"http://schemas.microsoft.com/identity/claims/objectidentifier":"22222222-2222-4222-8222-222222222222"}), "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary", "Microsoft.Storage/storageAccounts/listKeys/action", "Succeeded", "synthetic-event-001", "192.0.2.10", "OK", "55555555-5555-4555-8555-555555555555", "synthetic-operation-001",
-    "started-not-terminal", false, datetime(2026-10-01T11:58:00Z), datetime(2026-10-01T11:59:00Z), datetime(2026-10-01T11:59:30Z), "22222222-2222-4222-8222-222222222222", dynamic({"http://schemas.microsoft.com/identity/claims/objectidentifier":"22222222-2222-4222-8222-222222222222"}), "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary", "Microsoft.Storage/storageAccounts/listKeys/action", "Started", "synthetic-event-002", "192.0.2.10", "OK", "55555555-5555-4555-8555-555555555555", "synthetic-operation-002",
-    "foreign-actor", false, datetime(2026-10-01T11:58:00Z), datetime(2026-10-01T11:59:00Z), datetime(2026-10-01T11:59:30Z), "99999999-9999-4999-8999-999999999999", dynamic({"http://schemas.microsoft.com/identity/claims/objectidentifier":"99999999-9999-4999-8999-999999999999"}), "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary", "Microsoft.Storage/storageAccounts/listKeys/action", "Succeeded", "synthetic-event-003", "192.0.2.10", "OK", "55555555-5555-4555-8555-555555555555", "synthetic-operation-003",
-    "sibling-group-prefix-collision", false, datetime(2026-10-01T11:58:00Z), datetime(2026-10-01T11:59:00Z), datetime(2026-10-01T11:59:30Z), "22222222-2222-4222-8222-222222222222", dynamic({"http://schemas.microsoft.com/identity/claims/objectidentifier":"22222222-2222-4222-8222-222222222222"}), "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab-foreign/providers/Microsoft.Storage/storageAccounts/foreign", "Microsoft.Storage/storageAccounts/listKeys/action", "Succeeded", "synthetic-event-004", "192.0.2.10", "OK", "55555555-5555-4555-8555-555555555555", "synthetic-operation-004",
-    "caller-fallback", true, datetime(2026-10-01T11:58:00Z), datetime(2026-10-01T11:59:00Z), datetime(2026-10-01T11:59:30Z), "22222222-2222-4222-8222-222222222222", dynamic({}), "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary", "Microsoft.Storage/storageAccounts/listKeys/action", "Succeeded", "synthetic-event-005", "192.0.2.10", "OK", "55555555-5555-4555-8555-555555555555", "synthetic-operation-005",
-    "appid-is-not-object-id", false, datetime(2026-10-01T11:58:00Z), datetime(2026-10-01T11:59:00Z), datetime(2026-10-01T11:59:30Z), "99999999-9999-4999-8999-999999999999", dynamic({"appid":"22222222-2222-4222-8222-222222222222"}), "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary", "Microsoft.Storage/storageAccounts/listKeys/action", "Succeeded", "synthetic-event-006", "192.0.2.10", "OK", "55555555-5555-4555-8555-555555555555", "synthetic-operation-006",
-    "failed-lock-delete-hunting-only", false, datetime(2026-10-01T11:58:00Z), datetime(2026-10-01T11:59:00Z), datetime(2026-10-01T11:59:30Z), "22222222-2222-4222-8222-222222222222", dynamic({"http://schemas.microsoft.com/identity/claims/objectidentifier":"22222222-2222-4222-8222-222222222222"}), "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary", "Microsoft.Authorization/locks/delete", "Failed", "synthetic-event-007", "192.0.2.10", "Forbidden", "55555555-5555-4555-8555-555555555555", "synthetic-operation-007",
-    "late-arrival-within-lookback", true, datetime(2026-10-01T10:00:00Z), datetime(2026-10-01T11:59:00Z), datetime(2026-10-01T11:59:30Z), "22222222-2222-4222-8222-222222222222", dynamic({"http://schemas.microsoft.com/identity/claims/objectidentifier":"22222222-2222-4222-8222-222222222222"}), "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary", "Microsoft.Storage/storageAccounts/listKeys/action", "Succeeded", "synthetic-event-008", "192.0.2.10", "OK", "55555555-5555-4555-8555-555555555555", "synthetic-operation-008",
-    "older-than-source-lookback", false, datetime(2026-09-29T10:00:00Z), datetime(2026-10-01T11:59:00Z), datetime(2026-10-01T11:59:30Z), "22222222-2222-4222-8222-222222222222", dynamic({"http://schemas.microsoft.com/identity/claims/objectidentifier":"22222222-2222-4222-8222-222222222222"}), "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary", "Microsoft.Storage/storageAccounts/listKeys/action", "Succeeded", "synthetic-event-009", "192.0.2.10", "OK", "55555555-5555-4555-8555-555555555555", "synthetic-operation-009",
-    "case-normalized-scope", true, datetime(2026-10-01T11:58:00Z), datetime(2026-10-01T11:59:00Z), datetime(2026-10-01T11:59:30Z), "22222222-2222-4222-8222-222222222222", dynamic({"http://schemas.microsoft.com/identity/claims/objectidentifier":"22222222-2222-4222-8222-222222222222"}), "/SUBSCRIPTIONS/11111111-1111-4111-8111-111111111111/RESOURCEGROUPS/RG-STORM3168-LAB/PROVIDERS/MICROSOFT.STORAGE/STORAGEACCOUNTS/STORM3168CANARY", "Microsoft.Storage/storageAccounts/listKeys/action", "Succeeded", "synthetic-event-010", "192.0.2.10", "OK", "55555555-5555-4555-8555-555555555555", "synthetic-operation-010",
-    "ordinary-write-not-sensitive", false, datetime(2026-10-01T11:58:00Z), datetime(2026-10-01T11:59:00Z), datetime(2026-10-01T11:59:30Z), "22222222-2222-4222-8222-222222222222", dynamic({"http://schemas.microsoft.com/identity/claims/objectidentifier":"22222222-2222-4222-8222-222222222222"}), "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary", "Microsoft.Storage/storageAccounts/write", "Succeeded", "synthetic-event-011", "192.0.2.10", "OK", "55555555-5555-4555-8555-555555555555", "synthetic-operation-011",
-    "old-arrival", false, datetime(2026-10-01T11:38:00Z), datetime(2026-10-01T11:39:00Z), datetime(2026-10-01T11:40:00Z), "22222222-2222-4222-8222-222222222222", dynamic({"http://schemas.microsoft.com/identity/claims/objectidentifier":"22222222-2222-4222-8222-222222222222"}), "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary", "Microsoft.Storage/storageAccounts/listKeys/action", "Succeeded", "synthetic-event-012", "192.0.2.10", "OK", "55555555-5555-4555-8555-555555555555", "synthetic-operation-012",
-    "missing-event-id", false, datetime(2026-10-01T11:58:00Z), datetime(2026-10-01T11:59:00Z), datetime(2026-10-01T11:59:30Z), "22222222-2222-4222-8222-222222222222", dynamic({"http://schemas.microsoft.com/identity/claims/objectidentifier":"22222222-2222-4222-8222-222222222222"}), "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary", "Microsoft.Storage/storageAccounts/listKeys/action", "Succeeded", "", "192.0.2.10", "OK", "55555555-5555-4555-8555-555555555555", "synthetic-operation-013",
-    "missing-ingestion-fallback-submission", true, datetime(2026-10-01T11:58:00Z), datetime(2026-10-01T11:59:00Z), datetime(null), "22222222-2222-4222-8222-222222222222", dynamic({"http://schemas.microsoft.com/identity/claims/objectidentifier":"22222222-2222-4222-8222-222222222222"}), "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary", "Microsoft.Storage/storageAccounts/listKeys/action", "Succeeded", "synthetic-event-014", "192.0.2.10", "OK", "55555555-5555-4555-8555-555555555555", "synthetic-operation-014",
-    "duplicate-event-later-ingestion", true, datetime(2026-10-01T11:58:00Z), datetime(2026-10-01T11:59:00Z), datetime(2026-10-01T11:59:45Z), "22222222-2222-4222-8222-222222222222", dynamic({"http://schemas.microsoft.com/identity/claims/objectidentifier":"22222222-2222-4222-8222-222222222222"}), "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary", "Microsoft.Storage/storageAccounts/listKeys/action", "Succeeded", "synthetic-event-001", "192.0.2.10", "OK", "55555555-5555-4555-8555-555555555555", "synthetic-operation-001",
-    "mint-account-sas", true, datetime(2026-10-01T11:58:00Z), datetime(2026-10-01T11:59:00Z), datetime(2026-10-01T11:59:30Z), "22222222-2222-4222-8222-222222222222", dynamic({"http://schemas.microsoft.com/identity/claims/objectidentifier":"22222222-2222-4222-8222-222222222222"}), "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary", "Microsoft.Storage/storageAccounts/listAccountSas/action", "Succeeded", "synthetic-event-016", "192.0.2.10", "OK", "55555555-5555-4555-8555-555555555555", "synthetic-operation-016",
-    "mint-service-sas", true, datetime(2026-10-01T11:58:00Z), datetime(2026-10-01T11:59:00Z), datetime(2026-10-01T11:59:30Z), "22222222-2222-4222-8222-222222222222", dynamic({"http://schemas.microsoft.com/identity/claims/objectidentifier":"22222222-2222-4222-8222-222222222222"}), "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary", "Microsoft.Storage/storageAccounts/listServiceSas/action", "Succeeded", "synthetic-event-017", "192.0.2.10", "OK", "55555555-5555-4555-8555-555555555555", "synthetic-operation-017",
-    "short-oid-fallback", true, datetime(2026-10-01T11:58:00Z), datetime(2026-10-01T11:59:00Z), datetime(2026-10-01T11:59:30Z), "22222222-2222-4222-8222-222222222222", dynamic({"oid":"22222222-2222-4222-8222-222222222222"}), "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary", "Microsoft.Storage/storageAccounts/listKeys/action", "Succeeded", "synthetic-event-018", "192.0.2.10", "OK", "55555555-5555-4555-8555-555555555555", "synthetic-operation-018"
+let SyntheticInput=datatable(CaseId:string, ExpectedMatch:bool, TimeGenerated:datetime, EventSubmissionTimestamp:datetime, SyntheticIngestedAt:datetime, Caller:string, Claims_d:dynamic, ResourceId:string, _ResourceId:string, OperationNameValue:string, ActivityStatusValue:string, EventDataId:string, CallerIpAddress:string, ActivitySubstatusValue:string, CorrelationId:string, OperationId:string)[
+    "sensitive-success", true, datetime(2026-10-01T11:58:00Z), datetime(2026-10-01T11:59:00Z), datetime(2026-10-01T11:59:30Z), "22222222-2222-4222-8222-222222222222", dynamic({"http://schemas.microsoft.com/identity/claims/objectidentifier":"22222222-2222-4222-8222-222222222222"}), "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary", "", "Microsoft.Storage/storageAccounts/listKeys/action", "Succeeded", "synthetic-event-001", "192.0.2.10", "OK", "55555555-5555-4555-8555-555555555555", "synthetic-operation-001",
+    "started-not-terminal", false, datetime(2026-10-01T11:58:00Z), datetime(2026-10-01T11:59:00Z), datetime(2026-10-01T11:59:30Z), "22222222-2222-4222-8222-222222222222", dynamic({"http://schemas.microsoft.com/identity/claims/objectidentifier":"22222222-2222-4222-8222-222222222222"}), "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary", "", "Microsoft.Storage/storageAccounts/listKeys/action", "Started", "synthetic-event-002", "192.0.2.10", "OK", "55555555-5555-4555-8555-555555555555", "synthetic-operation-002",
+    "foreign-actor", false, datetime(2026-10-01T11:58:00Z), datetime(2026-10-01T11:59:00Z), datetime(2026-10-01T11:59:30Z), "99999999-9999-4999-8999-999999999999", dynamic({"http://schemas.microsoft.com/identity/claims/objectidentifier":"99999999-9999-4999-8999-999999999999"}), "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary", "", "Microsoft.Storage/storageAccounts/listKeys/action", "Succeeded", "synthetic-event-003", "192.0.2.10", "OK", "55555555-5555-4555-8555-555555555555", "synthetic-operation-003",
+    "sibling-group-prefix-collision", false, datetime(2026-10-01T11:58:00Z), datetime(2026-10-01T11:59:00Z), datetime(2026-10-01T11:59:30Z), "22222222-2222-4222-8222-222222222222", dynamic({"http://schemas.microsoft.com/identity/claims/objectidentifier":"22222222-2222-4222-8222-222222222222"}), "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab-foreign/providers/Microsoft.Storage/storageAccounts/foreign", "", "Microsoft.Storage/storageAccounts/listKeys/action", "Succeeded", "synthetic-event-004", "192.0.2.10", "OK", "55555555-5555-4555-8555-555555555555", "synthetic-operation-004",
+    "caller-fallback", true, datetime(2026-10-01T11:58:00Z), datetime(2026-10-01T11:59:00Z), datetime(2026-10-01T11:59:30Z), "22222222-2222-4222-8222-222222222222", dynamic({}), "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary", "", "Microsoft.Storage/storageAccounts/listKeys/action", "Succeeded", "synthetic-event-005", "192.0.2.10", "OK", "55555555-5555-4555-8555-555555555555", "synthetic-operation-005",
+    "appid-is-not-object-id", false, datetime(2026-10-01T11:58:00Z), datetime(2026-10-01T11:59:00Z), datetime(2026-10-01T11:59:30Z), "99999999-9999-4999-8999-999999999999", dynamic({"appid":"22222222-2222-4222-8222-222222222222"}), "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary", "", "Microsoft.Storage/storageAccounts/listKeys/action", "Succeeded", "synthetic-event-006", "192.0.2.10", "OK", "55555555-5555-4555-8555-555555555555", "synthetic-operation-006",
+    "failed-lock-delete-hunting-only", false, datetime(2026-10-01T11:58:00Z), datetime(2026-10-01T11:59:00Z), datetime(2026-10-01T11:59:30Z), "22222222-2222-4222-8222-222222222222", dynamic({"http://schemas.microsoft.com/identity/claims/objectidentifier":"22222222-2222-4222-8222-222222222222"}), "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary", "", "Microsoft.Authorization/locks/delete", "Failed", "synthetic-event-007", "192.0.2.10", "Forbidden", "55555555-5555-4555-8555-555555555555", "synthetic-operation-007",
+    "late-arrival-within-lookback", true, datetime(2026-10-01T10:00:00Z), datetime(2026-10-01T11:59:00Z), datetime(2026-10-01T11:59:30Z), "22222222-2222-4222-8222-222222222222", dynamic({"http://schemas.microsoft.com/identity/claims/objectidentifier":"22222222-2222-4222-8222-222222222222"}), "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary", "", "Microsoft.Storage/storageAccounts/listKeys/action", "Succeeded", "synthetic-event-008", "192.0.2.10", "OK", "55555555-5555-4555-8555-555555555555", "synthetic-operation-008",
+    "older-than-source-lookback", false, datetime(2026-09-29T10:00:00Z), datetime(2026-10-01T11:59:00Z), datetime(2026-10-01T11:59:30Z), "22222222-2222-4222-8222-222222222222", dynamic({"http://schemas.microsoft.com/identity/claims/objectidentifier":"22222222-2222-4222-8222-222222222222"}), "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary", "", "Microsoft.Storage/storageAccounts/listKeys/action", "Succeeded", "synthetic-event-009", "192.0.2.10", "OK", "55555555-5555-4555-8555-555555555555", "synthetic-operation-009",
+    "case-normalized-scope", true, datetime(2026-10-01T11:58:00Z), datetime(2026-10-01T11:59:00Z), datetime(2026-10-01T11:59:30Z), "22222222-2222-4222-8222-222222222222", dynamic({"http://schemas.microsoft.com/identity/claims/objectidentifier":"22222222-2222-4222-8222-222222222222"}), "/SUBSCRIPTIONS/11111111-1111-4111-8111-111111111111/RESOURCEGROUPS/RG-STORM3168-LAB/PROVIDERS/MICROSOFT.STORAGE/STORAGEACCOUNTS/STORM3168CANARY", "", "Microsoft.Storage/storageAccounts/listKeys/action", "Succeeded", "synthetic-event-010", "192.0.2.10", "OK", "55555555-5555-4555-8555-555555555555", "synthetic-operation-010",
+    "ordinary-write-not-sensitive", false, datetime(2026-10-01T11:58:00Z), datetime(2026-10-01T11:59:00Z), datetime(2026-10-01T11:59:30Z), "22222222-2222-4222-8222-222222222222", dynamic({"http://schemas.microsoft.com/identity/claims/objectidentifier":"22222222-2222-4222-8222-222222222222"}), "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary", "", "Microsoft.Storage/storageAccounts/write", "Succeeded", "synthetic-event-011", "192.0.2.10", "OK", "55555555-5555-4555-8555-555555555555", "synthetic-operation-011",
+    "old-arrival", false, datetime(2026-10-01T11:38:00Z), datetime(2026-10-01T11:39:00Z), datetime(2026-10-01T11:40:00Z), "22222222-2222-4222-8222-222222222222", dynamic({"http://schemas.microsoft.com/identity/claims/objectidentifier":"22222222-2222-4222-8222-222222222222"}), "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary", "", "Microsoft.Storage/storageAccounts/listKeys/action", "Succeeded", "synthetic-event-012", "192.0.2.10", "OK", "55555555-5555-4555-8555-555555555555", "synthetic-operation-012",
+    "missing-event-id", false, datetime(2026-10-01T11:58:00Z), datetime(2026-10-01T11:59:00Z), datetime(2026-10-01T11:59:30Z), "22222222-2222-4222-8222-222222222222", dynamic({"http://schemas.microsoft.com/identity/claims/objectidentifier":"22222222-2222-4222-8222-222222222222"}), "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary", "", "Microsoft.Storage/storageAccounts/listKeys/action", "Succeeded", "", "192.0.2.10", "OK", "55555555-5555-4555-8555-555555555555", "synthetic-operation-013",
+    "missing-ingestion-fallback-submission", true, datetime(2026-10-01T11:58:00Z), datetime(2026-10-01T11:59:00Z), datetime(null), "22222222-2222-4222-8222-222222222222", dynamic({"http://schemas.microsoft.com/identity/claims/objectidentifier":"22222222-2222-4222-8222-222222222222"}), "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary", "", "Microsoft.Storage/storageAccounts/listKeys/action", "Succeeded", "synthetic-event-014", "192.0.2.10", "OK", "55555555-5555-4555-8555-555555555555", "synthetic-operation-014",
+    "duplicate-event-later-ingestion", true, datetime(2026-10-01T11:58:00Z), datetime(2026-10-01T11:59:00Z), datetime(2026-10-01T11:59:45Z), "22222222-2222-4222-8222-222222222222", dynamic({"http://schemas.microsoft.com/identity/claims/objectidentifier":"22222222-2222-4222-8222-222222222222"}), "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary", "", "Microsoft.Storage/storageAccounts/listKeys/action", "Succeeded", "synthetic-event-001", "192.0.2.10", "OK", "55555555-5555-4555-8555-555555555555", "synthetic-operation-001",
+    "mint-account-sas", true, datetime(2026-10-01T11:58:00Z), datetime(2026-10-01T11:59:00Z), datetime(2026-10-01T11:59:30Z), "22222222-2222-4222-8222-222222222222", dynamic({"http://schemas.microsoft.com/identity/claims/objectidentifier":"22222222-2222-4222-8222-222222222222"}), "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary", "", "Microsoft.Storage/storageAccounts/listAccountSas/action", "Succeeded", "synthetic-event-016", "192.0.2.10", "OK", "55555555-5555-4555-8555-555555555555", "synthetic-operation-016",
+    "mint-service-sas", true, datetime(2026-10-01T11:58:00Z), datetime(2026-10-01T11:59:00Z), datetime(2026-10-01T11:59:30Z), "22222222-2222-4222-8222-222222222222", dynamic({"http://schemas.microsoft.com/identity/claims/objectidentifier":"22222222-2222-4222-8222-222222222222"}), "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary", "", "Microsoft.Storage/storageAccounts/listServiceSas/action", "Succeeded", "synthetic-event-017", "192.0.2.10", "OK", "55555555-5555-4555-8555-555555555555", "synthetic-operation-017",
+    "short-oid-fallback", true, datetime(2026-10-01T11:58:00Z), datetime(2026-10-01T11:59:00Z), datetime(2026-10-01T11:59:30Z), "22222222-2222-4222-8222-222222222222", dynamic({"oid":"22222222-2222-4222-8222-222222222222"}), "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary", "", "Microsoft.Storage/storageAccounts/listKeys/action", "Succeeded", "synthetic-event-018", "192.0.2.10", "OK", "55555555-5555-4555-8555-555555555555", "synthetic-operation-018",
+    "standard-resource-id-empty-legacy", true, datetime(2026-10-01T11:58:00Z), datetime(2026-10-01T11:59:00Z), datetime(2026-10-01T11:59:30Z), "22222222-2222-4222-8222-222222222222", dynamic({"http://schemas.microsoft.com/identity/claims/objectidentifier":"22222222-2222-4222-8222-222222222222"}), "", "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary", "MICROSOFT.STORAGE/STORAGEACCOUNTS/LISTKEYS/ACTION", "Success", "synthetic-event-019", "192.0.2.10", "OK", "55555555-5555-4555-8555-555555555555", "synthetic-operation-019",
+    "legacy-resource-id-fallback", true, datetime(2026-10-01T11:58:00Z), datetime(2026-10-01T11:59:00Z), datetime(2026-10-01T11:59:30Z), "22222222-2222-4222-8222-222222222222", dynamic({"http://schemas.microsoft.com/identity/claims/objectidentifier":"22222222-2222-4222-8222-222222222222"}), "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary", "", "MICROSOFT.STORAGE/STORAGEACCOUNTS/LISTKEYS/ACTION", "Success", "synthetic-event-020", "192.0.2.10", "OK", "55555555-5555-4555-8555-555555555555", "synthetic-operation-020",
+    "foreign-standard-id-cannot-fallback", false, datetime(2026-10-01T11:58:00Z), datetime(2026-10-01T11:59:00Z), datetime(2026-10-01T11:59:30Z), "22222222-2222-4222-8222-222222222222", dynamic({"http://schemas.microsoft.com/identity/claims/objectidentifier":"22222222-2222-4222-8222-222222222222"}), "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary", "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-foreign/providers/Microsoft.Storage/storageAccounts/storm3168canary", "MICROSOFT.STORAGE/STORAGEACCOUNTS/LISTKEYS/ACTION", "Success", "synthetic-event-021", "192.0.2.10", "OK", "55555555-5555-4555-8555-555555555555", "synthetic-operation-021",
+    "standard-id-wins-foreign-legacy", true, datetime(2026-10-01T11:58:00Z), datetime(2026-10-01T11:59:00Z), datetime(2026-10-01T11:59:30Z), "22222222-2222-4222-8222-222222222222", dynamic({"http://schemas.microsoft.com/identity/claims/objectidentifier":"22222222-2222-4222-8222-222222222222"}), "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-foreign/providers/Microsoft.Storage/storageAccounts/storm3168canary", "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary", "MICROSOFT.STORAGE/STORAGEACCOUNTS/LISTKEYS/ACTION", "Success", "synthetic-event-022", "192.0.2.10", "OK", "55555555-5555-4555-8555-555555555555", "synthetic-operation-022",
+    "missing-both-resource-ids", false, datetime(2026-10-01T11:58:00Z), datetime(2026-10-01T11:59:00Z), datetime(2026-10-01T11:59:30Z), "22222222-2222-4222-8222-222222222222", dynamic({"http://schemas.microsoft.com/identity/claims/objectidentifier":"22222222-2222-4222-8222-222222222222"}), "", "", "MICROSOFT.STORAGE/STORAGEACCOUNTS/LISTKEYS/ACTION", "Success", "synthetic-event-023", "192.0.2.10", "OK", "55555555-5555-4555-8555-555555555555", "synthetic-operation-023",
+    "malformed-standard-id-cannot-fallback", false, datetime(2026-10-01T11:58:00Z), datetime(2026-10-01T11:59:00Z), datetime(2026-10-01T11:59:30Z), "22222222-2222-4222-8222-222222222222", dynamic({"http://schemas.microsoft.com/identity/claims/objectidentifier":"22222222-2222-4222-8222-222222222222"}), "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary", " /subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary", "MICROSOFT.STORAGE/STORAGEACCOUNTS/LISTKEYS/ACTION", "Success", "synthetic-event-024", "192.0.2.10", "OK", "55555555-5555-4555-8555-555555555555", "synthetic-operation-024",
+    "standard-resource-id-start-not-terminal", false, datetime(2026-10-01T11:58:00Z), datetime(2026-10-01T11:59:00Z), datetime(2026-10-01T11:59:30Z), "22222222-2222-4222-8222-222222222222", dynamic({"http://schemas.microsoft.com/identity/claims/objectidentifier":"22222222-2222-4222-8222-222222222222"}), "", "/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/rg-storm3168-lab/providers/Microsoft.Storage/storageAccounts/storm3168canary", "MICROSOFT.STORAGE/STORAGEACCOUNTS/LISTKEYS/ACTION", "Start", "synthetic-event-025", "192.0.2.10", "OK", "55555555-5555-4555-8555-555555555555", "synthetic-operation-025"
 ];
 let ReplayCase000=view () {
 SyntheticInput
 | where CaseId == "sensitive-success"
+| extend ResourceId = coalesce(tostring(column_ifexists("_ResourceId", "")), tostring(column_ifexists("ResourceId", "")))
 | where TimeGenerated >= (ReferenceTime - 1d)
 | extend ActorOid = tolower(coalesce(
     tostring(Claims_d["http://schemas.microsoft.com/identity/claims/objectidentifier"]),
@@ -63,6 +71,7 @@ SyntheticInput
 let ReplayCase001=view () {
 SyntheticInput
 | where CaseId == "started-not-terminal"
+| extend ResourceId = coalesce(tostring(column_ifexists("_ResourceId", "")), tostring(column_ifexists("ResourceId", "")))
 | where TimeGenerated >= (ReferenceTime - 1d)
 | extend ActorOid = tolower(coalesce(
     tostring(Claims_d["http://schemas.microsoft.com/identity/claims/objectidentifier"]),
@@ -97,6 +106,7 @@ SyntheticInput
 let ReplayCase002=view () {
 SyntheticInput
 | where CaseId == "foreign-actor"
+| extend ResourceId = coalesce(tostring(column_ifexists("_ResourceId", "")), tostring(column_ifexists("ResourceId", "")))
 | where TimeGenerated >= (ReferenceTime - 1d)
 | extend ActorOid = tolower(coalesce(
     tostring(Claims_d["http://schemas.microsoft.com/identity/claims/objectidentifier"]),
@@ -131,6 +141,7 @@ SyntheticInput
 let ReplayCase003=view () {
 SyntheticInput
 | where CaseId == "sibling-group-prefix-collision"
+| extend ResourceId = coalesce(tostring(column_ifexists("_ResourceId", "")), tostring(column_ifexists("ResourceId", "")))
 | where TimeGenerated >= (ReferenceTime - 1d)
 | extend ActorOid = tolower(coalesce(
     tostring(Claims_d["http://schemas.microsoft.com/identity/claims/objectidentifier"]),
@@ -165,6 +176,7 @@ SyntheticInput
 let ReplayCase004=view () {
 SyntheticInput
 | where CaseId == "caller-fallback"
+| extend ResourceId = coalesce(tostring(column_ifexists("_ResourceId", "")), tostring(column_ifexists("ResourceId", "")))
 | where TimeGenerated >= (ReferenceTime - 1d)
 | extend ActorOid = tolower(coalesce(
     tostring(Claims_d["http://schemas.microsoft.com/identity/claims/objectidentifier"]),
@@ -199,6 +211,7 @@ SyntheticInput
 let ReplayCase005=view () {
 SyntheticInput
 | where CaseId == "appid-is-not-object-id"
+| extend ResourceId = coalesce(tostring(column_ifexists("_ResourceId", "")), tostring(column_ifexists("ResourceId", "")))
 | where TimeGenerated >= (ReferenceTime - 1d)
 | extend ActorOid = tolower(coalesce(
     tostring(Claims_d["http://schemas.microsoft.com/identity/claims/objectidentifier"]),
@@ -233,6 +246,7 @@ SyntheticInput
 let ReplayCase006=view () {
 SyntheticInput
 | where CaseId == "failed-lock-delete-hunting-only"
+| extend ResourceId = coalesce(tostring(column_ifexists("_ResourceId", "")), tostring(column_ifexists("ResourceId", "")))
 | where TimeGenerated >= (ReferenceTime - 1d)
 | extend ActorOid = tolower(coalesce(
     tostring(Claims_d["http://schemas.microsoft.com/identity/claims/objectidentifier"]),
@@ -267,6 +281,7 @@ SyntheticInput
 let ReplayCase007=view () {
 SyntheticInput
 | where CaseId == "late-arrival-within-lookback"
+| extend ResourceId = coalesce(tostring(column_ifexists("_ResourceId", "")), tostring(column_ifexists("ResourceId", "")))
 | where TimeGenerated >= (ReferenceTime - 1d)
 | extend ActorOid = tolower(coalesce(
     tostring(Claims_d["http://schemas.microsoft.com/identity/claims/objectidentifier"]),
@@ -301,6 +316,7 @@ SyntheticInput
 let ReplayCase008=view () {
 SyntheticInput
 | where CaseId == "older-than-source-lookback"
+| extend ResourceId = coalesce(tostring(column_ifexists("_ResourceId", "")), tostring(column_ifexists("ResourceId", "")))
 | where TimeGenerated >= (ReferenceTime - 1d)
 | extend ActorOid = tolower(coalesce(
     tostring(Claims_d["http://schemas.microsoft.com/identity/claims/objectidentifier"]),
@@ -335,6 +351,7 @@ SyntheticInput
 let ReplayCase009=view () {
 SyntheticInput
 | where CaseId == "case-normalized-scope"
+| extend ResourceId = coalesce(tostring(column_ifexists("_ResourceId", "")), tostring(column_ifexists("ResourceId", "")))
 | where TimeGenerated >= (ReferenceTime - 1d)
 | extend ActorOid = tolower(coalesce(
     tostring(Claims_d["http://schemas.microsoft.com/identity/claims/objectidentifier"]),
@@ -369,6 +386,7 @@ SyntheticInput
 let ReplayCase010=view () {
 SyntheticInput
 | where CaseId == "ordinary-write-not-sensitive"
+| extend ResourceId = coalesce(tostring(column_ifexists("_ResourceId", "")), tostring(column_ifexists("ResourceId", "")))
 | where TimeGenerated >= (ReferenceTime - 1d)
 | extend ActorOid = tolower(coalesce(
     tostring(Claims_d["http://schemas.microsoft.com/identity/claims/objectidentifier"]),
@@ -403,6 +421,7 @@ SyntheticInput
 let ReplayCase011=view () {
 SyntheticInput
 | where CaseId == "old-arrival"
+| extend ResourceId = coalesce(tostring(column_ifexists("_ResourceId", "")), tostring(column_ifexists("ResourceId", "")))
 | where TimeGenerated >= (ReferenceTime - 1d)
 | extend ActorOid = tolower(coalesce(
     tostring(Claims_d["http://schemas.microsoft.com/identity/claims/objectidentifier"]),
@@ -437,6 +456,7 @@ SyntheticInput
 let ReplayCase012=view () {
 SyntheticInput
 | where CaseId == "missing-event-id"
+| extend ResourceId = coalesce(tostring(column_ifexists("_ResourceId", "")), tostring(column_ifexists("ResourceId", "")))
 | where TimeGenerated >= (ReferenceTime - 1d)
 | extend ActorOid = tolower(coalesce(
     tostring(Claims_d["http://schemas.microsoft.com/identity/claims/objectidentifier"]),
@@ -471,6 +491,7 @@ SyntheticInput
 let ReplayCase013=view () {
 SyntheticInput
 | where CaseId == "missing-ingestion-fallback-submission"
+| extend ResourceId = coalesce(tostring(column_ifexists("_ResourceId", "")), tostring(column_ifexists("ResourceId", "")))
 | where TimeGenerated >= (ReferenceTime - 1d)
 | extend ActorOid = tolower(coalesce(
     tostring(Claims_d["http://schemas.microsoft.com/identity/claims/objectidentifier"]),
@@ -505,6 +526,7 @@ SyntheticInput
 let ReplayCase014=view () {
 SyntheticInput
 | where CaseId == "duplicate-event-later-ingestion"
+| extend ResourceId = coalesce(tostring(column_ifexists("_ResourceId", "")), tostring(column_ifexists("ResourceId", "")))
 | where TimeGenerated >= (ReferenceTime - 1d)
 | extend ActorOid = tolower(coalesce(
     tostring(Claims_d["http://schemas.microsoft.com/identity/claims/objectidentifier"]),
@@ -539,6 +561,7 @@ SyntheticInput
 let ReplayCase015=view () {
 SyntheticInput
 | where CaseId == "mint-account-sas"
+| extend ResourceId = coalesce(tostring(column_ifexists("_ResourceId", "")), tostring(column_ifexists("ResourceId", "")))
 | where TimeGenerated >= (ReferenceTime - 1d)
 | extend ActorOid = tolower(coalesce(
     tostring(Claims_d["http://schemas.microsoft.com/identity/claims/objectidentifier"]),
@@ -573,6 +596,7 @@ SyntheticInput
 let ReplayCase016=view () {
 SyntheticInput
 | where CaseId == "mint-service-sas"
+| extend ResourceId = coalesce(tostring(column_ifexists("_ResourceId", "")), tostring(column_ifexists("ResourceId", "")))
 | where TimeGenerated >= (ReferenceTime - 1d)
 | extend ActorOid = tolower(coalesce(
     tostring(Claims_d["http://schemas.microsoft.com/identity/claims/objectidentifier"]),
@@ -607,6 +631,7 @@ SyntheticInput
 let ReplayCase017=view () {
 SyntheticInput
 | where CaseId == "short-oid-fallback"
+| extend ResourceId = coalesce(tostring(column_ifexists("_ResourceId", "")), tostring(column_ifexists("ResourceId", "")))
 | where TimeGenerated >= (ReferenceTime - 1d)
 | extend ActorOid = tolower(coalesce(
     tostring(Claims_d["http://schemas.microsoft.com/identity/claims/objectidentifier"]),
@@ -638,8 +663,254 @@ SyntheticInput
 | summarize ActualPredicate=count() > 0
 | extend CaseId="short-oid-fallback", ExpectedMatch=true
 };
+let ReplayCase018=view () {
+SyntheticInput
+| where CaseId == "standard-resource-id-empty-legacy"
+| extend ResourceId = coalesce(tostring(column_ifexists("_ResourceId", "")), tostring(column_ifexists("ResourceId", "")))
+| where TimeGenerated >= (ReferenceTime - 1d)
+| extend ActorOid = tolower(coalesce(
+    tostring(Claims_d["http://schemas.microsoft.com/identity/claims/objectidentifier"]),
+    tostring(Claims_d.oid), Caller))
+| where ActorOid == tolower(ActorObjectId)
+| extend NormalizedResourceId = tolower(ResourceId)
+| where NormalizedResourceId == LabGroup or NormalizedResourceId startswith LabPrefix
+| extend ArrivalTime = coalesce(SyntheticIngestedAt, EventSubmissionTimestamp, TimeGenerated),
+    ArrivalClock = case(isnotnull(SyntheticIngestedAt), "workspace_ingestion",
+                        isnotnull(EventSubmissionTimestamp), "provider_submission", "event_time_fallback")
+| where ArrivalTime > (ReferenceTime - 20m) and ArrivalTime <= ReferenceTime
+| where tolower(ActivityStatusValue) in ("success", "succeeded")
+| where tolower(OperationNameValue) in (
+    "microsoft.storage/storageaccounts/listkeys/action",
+    "microsoft.storage/storageaccounts/listaccountsas/action",
+    "microsoft.storage/storageaccounts/listservicesas/action",
+    "microsoft.storage/storageaccounts/regeneratekey/action",
+    "microsoft.storage/storageaccounts/delete",
+    "microsoft.authorization/locks/delete")
+| where isnotempty(EventDataId)
+| summarize arg_max(ArrivalTime, *) by EventDataId
+| extend SignalPriority = case(tolower(OperationNameValue) endswith "/delete", 3,
+                              tolower(OperationNameValue) endswith "/regeneratekey/action", 2, 1)
+| order by SignalPriority desc, TimeGenerated asc, EventDataId asc
+| take 1
+| project TimeGenerated, ProviderEventTime = strcat(format_datetime(TimeGenerated, "yyyy-MM-dd"), "T", format_datetime(TimeGenerated, "HH:mm:ss.fffffff"), "Z"), ArrivalTime, ArrivalClock, EventSubmissionTimestamp, LabId = ConfiguredLabId,
+    ActorObjectId = ActorOid, CallerIpAddress, ResourceId, OperationNameValue,
+    ActivityStatusValue, ActivitySubstatusValue, CorrelationId, OperationId, EventDataId
+| summarize ActualPredicate=count() > 0
+| extend CaseId="standard-resource-id-empty-legacy", ExpectedMatch=true
+};
+let ReplayCase019=view () {
+SyntheticInput
+| where CaseId == "legacy-resource-id-fallback"
+| extend ResourceId = coalesce(tostring(column_ifexists("_ResourceId", "")), tostring(column_ifexists("ResourceId", "")))
+| where TimeGenerated >= (ReferenceTime - 1d)
+| extend ActorOid = tolower(coalesce(
+    tostring(Claims_d["http://schemas.microsoft.com/identity/claims/objectidentifier"]),
+    tostring(Claims_d.oid), Caller))
+| where ActorOid == tolower(ActorObjectId)
+| extend NormalizedResourceId = tolower(ResourceId)
+| where NormalizedResourceId == LabGroup or NormalizedResourceId startswith LabPrefix
+| extend ArrivalTime = coalesce(SyntheticIngestedAt, EventSubmissionTimestamp, TimeGenerated),
+    ArrivalClock = case(isnotnull(SyntheticIngestedAt), "workspace_ingestion",
+                        isnotnull(EventSubmissionTimestamp), "provider_submission", "event_time_fallback")
+| where ArrivalTime > (ReferenceTime - 20m) and ArrivalTime <= ReferenceTime
+| where tolower(ActivityStatusValue) in ("success", "succeeded")
+| where tolower(OperationNameValue) in (
+    "microsoft.storage/storageaccounts/listkeys/action",
+    "microsoft.storage/storageaccounts/listaccountsas/action",
+    "microsoft.storage/storageaccounts/listservicesas/action",
+    "microsoft.storage/storageaccounts/regeneratekey/action",
+    "microsoft.storage/storageaccounts/delete",
+    "microsoft.authorization/locks/delete")
+| where isnotempty(EventDataId)
+| summarize arg_max(ArrivalTime, *) by EventDataId
+| extend SignalPriority = case(tolower(OperationNameValue) endswith "/delete", 3,
+                              tolower(OperationNameValue) endswith "/regeneratekey/action", 2, 1)
+| order by SignalPriority desc, TimeGenerated asc, EventDataId asc
+| take 1
+| project TimeGenerated, ProviderEventTime = strcat(format_datetime(TimeGenerated, "yyyy-MM-dd"), "T", format_datetime(TimeGenerated, "HH:mm:ss.fffffff"), "Z"), ArrivalTime, ArrivalClock, EventSubmissionTimestamp, LabId = ConfiguredLabId,
+    ActorObjectId = ActorOid, CallerIpAddress, ResourceId, OperationNameValue,
+    ActivityStatusValue, ActivitySubstatusValue, CorrelationId, OperationId, EventDataId
+| summarize ActualPredicate=count() > 0
+| extend CaseId="legacy-resource-id-fallback", ExpectedMatch=true
+};
+let ReplayCase020=view () {
+SyntheticInput
+| where CaseId == "foreign-standard-id-cannot-fallback"
+| extend ResourceId = coalesce(tostring(column_ifexists("_ResourceId", "")), tostring(column_ifexists("ResourceId", "")))
+| where TimeGenerated >= (ReferenceTime - 1d)
+| extend ActorOid = tolower(coalesce(
+    tostring(Claims_d["http://schemas.microsoft.com/identity/claims/objectidentifier"]),
+    tostring(Claims_d.oid), Caller))
+| where ActorOid == tolower(ActorObjectId)
+| extend NormalizedResourceId = tolower(ResourceId)
+| where NormalizedResourceId == LabGroup or NormalizedResourceId startswith LabPrefix
+| extend ArrivalTime = coalesce(SyntheticIngestedAt, EventSubmissionTimestamp, TimeGenerated),
+    ArrivalClock = case(isnotnull(SyntheticIngestedAt), "workspace_ingestion",
+                        isnotnull(EventSubmissionTimestamp), "provider_submission", "event_time_fallback")
+| where ArrivalTime > (ReferenceTime - 20m) and ArrivalTime <= ReferenceTime
+| where tolower(ActivityStatusValue) in ("success", "succeeded")
+| where tolower(OperationNameValue) in (
+    "microsoft.storage/storageaccounts/listkeys/action",
+    "microsoft.storage/storageaccounts/listaccountsas/action",
+    "microsoft.storage/storageaccounts/listservicesas/action",
+    "microsoft.storage/storageaccounts/regeneratekey/action",
+    "microsoft.storage/storageaccounts/delete",
+    "microsoft.authorization/locks/delete")
+| where isnotempty(EventDataId)
+| summarize arg_max(ArrivalTime, *) by EventDataId
+| extend SignalPriority = case(tolower(OperationNameValue) endswith "/delete", 3,
+                              tolower(OperationNameValue) endswith "/regeneratekey/action", 2, 1)
+| order by SignalPriority desc, TimeGenerated asc, EventDataId asc
+| take 1
+| project TimeGenerated, ProviderEventTime = strcat(format_datetime(TimeGenerated, "yyyy-MM-dd"), "T", format_datetime(TimeGenerated, "HH:mm:ss.fffffff"), "Z"), ArrivalTime, ArrivalClock, EventSubmissionTimestamp, LabId = ConfiguredLabId,
+    ActorObjectId = ActorOid, CallerIpAddress, ResourceId, OperationNameValue,
+    ActivityStatusValue, ActivitySubstatusValue, CorrelationId, OperationId, EventDataId
+| summarize ActualPredicate=count() > 0
+| extend CaseId="foreign-standard-id-cannot-fallback", ExpectedMatch=false
+};
+let ReplayCase021=view () {
+SyntheticInput
+| where CaseId == "standard-id-wins-foreign-legacy"
+| extend ResourceId = coalesce(tostring(column_ifexists("_ResourceId", "")), tostring(column_ifexists("ResourceId", "")))
+| where TimeGenerated >= (ReferenceTime - 1d)
+| extend ActorOid = tolower(coalesce(
+    tostring(Claims_d["http://schemas.microsoft.com/identity/claims/objectidentifier"]),
+    tostring(Claims_d.oid), Caller))
+| where ActorOid == tolower(ActorObjectId)
+| extend NormalizedResourceId = tolower(ResourceId)
+| where NormalizedResourceId == LabGroup or NormalizedResourceId startswith LabPrefix
+| extend ArrivalTime = coalesce(SyntheticIngestedAt, EventSubmissionTimestamp, TimeGenerated),
+    ArrivalClock = case(isnotnull(SyntheticIngestedAt), "workspace_ingestion",
+                        isnotnull(EventSubmissionTimestamp), "provider_submission", "event_time_fallback")
+| where ArrivalTime > (ReferenceTime - 20m) and ArrivalTime <= ReferenceTime
+| where tolower(ActivityStatusValue) in ("success", "succeeded")
+| where tolower(OperationNameValue) in (
+    "microsoft.storage/storageaccounts/listkeys/action",
+    "microsoft.storage/storageaccounts/listaccountsas/action",
+    "microsoft.storage/storageaccounts/listservicesas/action",
+    "microsoft.storage/storageaccounts/regeneratekey/action",
+    "microsoft.storage/storageaccounts/delete",
+    "microsoft.authorization/locks/delete")
+| where isnotempty(EventDataId)
+| summarize arg_max(ArrivalTime, *) by EventDataId
+| extend SignalPriority = case(tolower(OperationNameValue) endswith "/delete", 3,
+                              tolower(OperationNameValue) endswith "/regeneratekey/action", 2, 1)
+| order by SignalPriority desc, TimeGenerated asc, EventDataId asc
+| take 1
+| project TimeGenerated, ProviderEventTime = strcat(format_datetime(TimeGenerated, "yyyy-MM-dd"), "T", format_datetime(TimeGenerated, "HH:mm:ss.fffffff"), "Z"), ArrivalTime, ArrivalClock, EventSubmissionTimestamp, LabId = ConfiguredLabId,
+    ActorObjectId = ActorOid, CallerIpAddress, ResourceId, OperationNameValue,
+    ActivityStatusValue, ActivitySubstatusValue, CorrelationId, OperationId, EventDataId
+| summarize ActualPredicate=count() > 0
+| extend CaseId="standard-id-wins-foreign-legacy", ExpectedMatch=true
+};
+let ReplayCase022=view () {
+SyntheticInput
+| where CaseId == "missing-both-resource-ids"
+| extend ResourceId = coalesce(tostring(column_ifexists("_ResourceId", "")), tostring(column_ifexists("ResourceId", "")))
+| where TimeGenerated >= (ReferenceTime - 1d)
+| extend ActorOid = tolower(coalesce(
+    tostring(Claims_d["http://schemas.microsoft.com/identity/claims/objectidentifier"]),
+    tostring(Claims_d.oid), Caller))
+| where ActorOid == tolower(ActorObjectId)
+| extend NormalizedResourceId = tolower(ResourceId)
+| where NormalizedResourceId == LabGroup or NormalizedResourceId startswith LabPrefix
+| extend ArrivalTime = coalesce(SyntheticIngestedAt, EventSubmissionTimestamp, TimeGenerated),
+    ArrivalClock = case(isnotnull(SyntheticIngestedAt), "workspace_ingestion",
+                        isnotnull(EventSubmissionTimestamp), "provider_submission", "event_time_fallback")
+| where ArrivalTime > (ReferenceTime - 20m) and ArrivalTime <= ReferenceTime
+| where tolower(ActivityStatusValue) in ("success", "succeeded")
+| where tolower(OperationNameValue) in (
+    "microsoft.storage/storageaccounts/listkeys/action",
+    "microsoft.storage/storageaccounts/listaccountsas/action",
+    "microsoft.storage/storageaccounts/listservicesas/action",
+    "microsoft.storage/storageaccounts/regeneratekey/action",
+    "microsoft.storage/storageaccounts/delete",
+    "microsoft.authorization/locks/delete")
+| where isnotempty(EventDataId)
+| summarize arg_max(ArrivalTime, *) by EventDataId
+| extend SignalPriority = case(tolower(OperationNameValue) endswith "/delete", 3,
+                              tolower(OperationNameValue) endswith "/regeneratekey/action", 2, 1)
+| order by SignalPriority desc, TimeGenerated asc, EventDataId asc
+| take 1
+| project TimeGenerated, ProviderEventTime = strcat(format_datetime(TimeGenerated, "yyyy-MM-dd"), "T", format_datetime(TimeGenerated, "HH:mm:ss.fffffff"), "Z"), ArrivalTime, ArrivalClock, EventSubmissionTimestamp, LabId = ConfiguredLabId,
+    ActorObjectId = ActorOid, CallerIpAddress, ResourceId, OperationNameValue,
+    ActivityStatusValue, ActivitySubstatusValue, CorrelationId, OperationId, EventDataId
+| summarize ActualPredicate=count() > 0
+| extend CaseId="missing-both-resource-ids", ExpectedMatch=false
+};
+let ReplayCase023=view () {
+SyntheticInput
+| where CaseId == "malformed-standard-id-cannot-fallback"
+| extend ResourceId = coalesce(tostring(column_ifexists("_ResourceId", "")), tostring(column_ifexists("ResourceId", "")))
+| where TimeGenerated >= (ReferenceTime - 1d)
+| extend ActorOid = tolower(coalesce(
+    tostring(Claims_d["http://schemas.microsoft.com/identity/claims/objectidentifier"]),
+    tostring(Claims_d.oid), Caller))
+| where ActorOid == tolower(ActorObjectId)
+| extend NormalizedResourceId = tolower(ResourceId)
+| where NormalizedResourceId == LabGroup or NormalizedResourceId startswith LabPrefix
+| extend ArrivalTime = coalesce(SyntheticIngestedAt, EventSubmissionTimestamp, TimeGenerated),
+    ArrivalClock = case(isnotnull(SyntheticIngestedAt), "workspace_ingestion",
+                        isnotnull(EventSubmissionTimestamp), "provider_submission", "event_time_fallback")
+| where ArrivalTime > (ReferenceTime - 20m) and ArrivalTime <= ReferenceTime
+| where tolower(ActivityStatusValue) in ("success", "succeeded")
+| where tolower(OperationNameValue) in (
+    "microsoft.storage/storageaccounts/listkeys/action",
+    "microsoft.storage/storageaccounts/listaccountsas/action",
+    "microsoft.storage/storageaccounts/listservicesas/action",
+    "microsoft.storage/storageaccounts/regeneratekey/action",
+    "microsoft.storage/storageaccounts/delete",
+    "microsoft.authorization/locks/delete")
+| where isnotempty(EventDataId)
+| summarize arg_max(ArrivalTime, *) by EventDataId
+| extend SignalPriority = case(tolower(OperationNameValue) endswith "/delete", 3,
+                              tolower(OperationNameValue) endswith "/regeneratekey/action", 2, 1)
+| order by SignalPriority desc, TimeGenerated asc, EventDataId asc
+| take 1
+| project TimeGenerated, ProviderEventTime = strcat(format_datetime(TimeGenerated, "yyyy-MM-dd"), "T", format_datetime(TimeGenerated, "HH:mm:ss.fffffff"), "Z"), ArrivalTime, ArrivalClock, EventSubmissionTimestamp, LabId = ConfiguredLabId,
+    ActorObjectId = ActorOid, CallerIpAddress, ResourceId, OperationNameValue,
+    ActivityStatusValue, ActivitySubstatusValue, CorrelationId, OperationId, EventDataId
+| summarize ActualPredicate=count() > 0
+| extend CaseId="malformed-standard-id-cannot-fallback", ExpectedMatch=false
+};
+let ReplayCase024=view () {
+SyntheticInput
+| where CaseId == "standard-resource-id-start-not-terminal"
+| extend ResourceId = coalesce(tostring(column_ifexists("_ResourceId", "")), tostring(column_ifexists("ResourceId", "")))
+| where TimeGenerated >= (ReferenceTime - 1d)
+| extend ActorOid = tolower(coalesce(
+    tostring(Claims_d["http://schemas.microsoft.com/identity/claims/objectidentifier"]),
+    tostring(Claims_d.oid), Caller))
+| where ActorOid == tolower(ActorObjectId)
+| extend NormalizedResourceId = tolower(ResourceId)
+| where NormalizedResourceId == LabGroup or NormalizedResourceId startswith LabPrefix
+| extend ArrivalTime = coalesce(SyntheticIngestedAt, EventSubmissionTimestamp, TimeGenerated),
+    ArrivalClock = case(isnotnull(SyntheticIngestedAt), "workspace_ingestion",
+                        isnotnull(EventSubmissionTimestamp), "provider_submission", "event_time_fallback")
+| where ArrivalTime > (ReferenceTime - 20m) and ArrivalTime <= ReferenceTime
+| where tolower(ActivityStatusValue) in ("success", "succeeded")
+| where tolower(OperationNameValue) in (
+    "microsoft.storage/storageaccounts/listkeys/action",
+    "microsoft.storage/storageaccounts/listaccountsas/action",
+    "microsoft.storage/storageaccounts/listservicesas/action",
+    "microsoft.storage/storageaccounts/regeneratekey/action",
+    "microsoft.storage/storageaccounts/delete",
+    "microsoft.authorization/locks/delete")
+| where isnotempty(EventDataId)
+| summarize arg_max(ArrivalTime, *) by EventDataId
+| extend SignalPriority = case(tolower(OperationNameValue) endswith "/delete", 3,
+                              tolower(OperationNameValue) endswith "/regeneratekey/action", 2, 1)
+| order by SignalPriority desc, TimeGenerated asc, EventDataId asc
+| take 1
+| project TimeGenerated, ProviderEventTime = strcat(format_datetime(TimeGenerated, "yyyy-MM-dd"), "T", format_datetime(TimeGenerated, "HH:mm:ss.fffffff"), "Z"), ArrivalTime, ArrivalClock, EventSubmissionTimestamp, LabId = ConfiguredLabId,
+    ActorObjectId = ActorOid, CallerIpAddress, ResourceId, OperationNameValue,
+    ActivityStatusValue, ActivitySubstatusValue, CorrelationId, OperationId, EventDataId
+| summarize ActualPredicate=count() > 0
+| extend CaseId="standard-resource-id-start-not-terminal", ExpectedMatch=false
+};
 let ReplayFullPipeline=view () {
 SyntheticInput
+| extend ResourceId = coalesce(tostring(column_ifexists("_ResourceId", "")), tostring(column_ifexists("ResourceId", "")))
 | where TimeGenerated >= (ReferenceTime - 1d)
 | extend ActorOid = tolower(coalesce(
     tostring(Claims_d["http://schemas.microsoft.com/identity/claims/objectidentifier"]),
@@ -691,5 +962,12 @@ ReplayCase014,
 ReplayCase015,
 ReplayCase016,
 ReplayCase017,
+ReplayCase018,
+ReplayCase019,
+ReplayCase020,
+ReplayCase021,
+ReplayCase022,
+ReplayCase023,
+ReplayCase024,
 ReplayFullPipeline
 | project CaseId, ExpectedMatch, ActualPredicate, MatchesExpectation=(ActualPredicate == ExpectedMatch)

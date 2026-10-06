@@ -16,6 +16,15 @@ Status: **source-reviewed and packaged; not run in a live workspace**. Queries u
 
 ## Scope and clocks
 
+Activity queries select the standard `_ResourceId` when it is nonempty and use
+legacy `ResourceId` only when the standard value is absent, null or empty. This
+selection happens before every resource-scope predicate. The selected value is
+published as `ResourceId`, preserving alert custom details and workbook/export
+contracts. A foreign or malformed nonempty `_ResourceId` is never rescued by a
+legacy canary ID; the query excludes it. `column_ifexists` also supports a schema
+that lacks one of these columns. The real-shape fixtures cover empty legacy IDs,
+legacy fallback, conflicts in both directions, and Success/Start status values.
+
 Use the service-principal **object ID**, not its application/client ID. Claims object-ID fields take precedence over Caller; ambiguous/missing matching evidence yields no match. The exact normalized resource-group ID plus slash-boundary prefix prevents a similarly named sibling group from matching. No subscription-wide wildcard is supplied.
 
 TimeGenerated is provider event time. EventSubmissionTimestamp is a distinct provider submission/availability field. ingestion_time() is approximate workspace ingestion, nullable and not a globally ordered clock. The alert query uses a **20-minute arrival gate**, a five-minute schedule, and a one-day source lookback. This intentionally overlaps executions: it allows for the scheduled-rule platform delay and a bounded amount of scheduler jitter. An event ingested quickly can fall beyond one execution's event-time horizon; the older five-minute arrival gate could discard it on the next execution. The independent scheduler regression tests include that counterexample, a skipped run and ten minutes of extra delay. These local tests model the documented timing contract; they do not execute Kusto or prove every possible platform delay.
