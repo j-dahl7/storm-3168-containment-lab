@@ -121,6 +121,8 @@ def classification(receipt: dict) -> tuple[str, str]:
     mapping = {"group-member-remove": ("CORE04", "group-membership-removal"),
                "sp-disable": ("CORE12", "service-principal-disable") if capability == "blob-read" else ("CORE05", "service-principal-disable"),
                "secret-remove": ("CORE06", "tested-secret-removal"), "app-deactivate": ("extended", "application-deactivation")}
+    if action == "lock-readonly" and capability == "listkeys":
+        return "CORE11", "account-readonly-lock"
     return mapping.get(action, ("unmapped", "unknown"))
 
 
@@ -162,7 +164,10 @@ def assess(path: Path, index: int, entries: dict, repository: Path | None) -> tu
               "evidence_bundle_sha256": bundle, "source_hashes_sha256": code_digest,
               "source_revision": receipt.get("source_commit") if re.fullmatch(r"[0-9a-f]{40}", str(receipt.get("source_commit", ""))) else None,
               "cleanup_verified": receipt.get("credential_removed") is True}
+    family = receipt.get("transport_address_family", "unrecorded")
+    result["transport_address_family"] = family if isinstance(family, str) and family in {"system", "ipv4", "unrecorded"} else "unknown"
     reasons = result["reasons"]
+    if result["transport_address_family"] == "unknown": reasons.append("transport_address_family_unverified")
     if receipt.get("mode") != "live": reasons.append("not_live_evidence")
     if completion != "observation_completed": reasons.append("trial_incomplete")
     if receipt.get("token_refresh") is not False: reasons.append("frozen_credential_unverified")
@@ -183,6 +188,14 @@ def assess(path: Path, index: int, entries: dict, repository: Path | None) -> tu
         assignment = receipt.get("action_target", {}).get("role_assignment_id")
         if receipt.get("action_target") != response_target(model, receipt["action"], assignment):
             raise SafetyError("Recorded target mismatch")
+        if case == "CORE11":
+            lock = receipt.get("lock_trial", {})
+            expected = {"lock_id": model.lock_id, "scope": model.storage_id, "expected_level": "ReadOnly",
+                        "ownership_notes": "storm3168LabId=" + model.lab_id, "absence_verified": True}
+            if (receipt.get("auth") != "bearer" or lock.get("identity_revocation_tested") is not False or lock.get("interpretation") != "control_plane_prevention_only"
+                    or any(any(lock.get(stage, {}).get(key) != value for key, value in expected.items()) for stage in ("before_baseline", "before_action"))):
+                reasons.append("lock_freshness_or_scope_unverified")
+            result.update(interpretation="control_plane_prevention_only", identity_revocation_tested=False)
         for phase, rows in (("baseline", baseline), ("post_action", post)):
             ends = [row for row in rows if row.get("kind") == "run_end" and row.get("run_id") == receipt.get("probe_runs", {}).get(phase)]
             if len(ends) != 1 or ends[0].get("status") != "completed": reasons.append(phase + "_incomplete")
@@ -225,6 +238,7 @@ def assess(path: Path, index: int, entries: dict, repository: Path | None) -> tu
         action_shape = {k: v for k, v in receipt["action_target"].items() if k not in {"role_assignment_id", "credential_key_id"}}
         comparable = (case, variant, receipt["capability"], receipt["auth"], model.location, code_digest,
                       digest(action_shape), model.storage_id, receipt.get("observation_window", {}).get("mode"), receipt.get("probe_interval_seconds"))
+        comparable += (result["transport_address_family"],)
     except (SafetyError, ValueError, TypeError, KeyError, AttributeError, IndexError):
         reasons.append("phase_linkage_or_schema_unverified")
     if entry.get("operator_reviewed") is True and entry.get("decision") == "accepted":
@@ -259,7 +273,7 @@ def build_report(paths: list[Path], review: dict | None = None, repository: Path
     for key, rows in groups.items():
         frequencies = {identity: sum(other == identity for _, other in rows) for _, identity in rows}
         usable = [result for result, identity in rows if result.get("uncensored_interval") and frequencies[identity] == 1]
-        aggregate = {"case": key[0], "configuration": key[1], "capability": key[2], "auth": key[3],
+        aggregate = {"case": key[0], "configuration": key[1], "capability": key[2], "auth": key[3], "transport_address_family": key[-1],
                      "accepted_trials": len(rows), "comparable_uncensored_trials": len(usable), "median_observed_interval_seconds": None,
                      "duplicate_credential_trials_excluded": sum(frequencies[identity] > 1 for _, identity in rows),
                      "labels": [result["label"] for result, _ in rows]}

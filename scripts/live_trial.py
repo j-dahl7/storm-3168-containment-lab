@@ -26,10 +26,11 @@ import uuid
 from lab_support import ROOT, assert_context, assert_owned, az, guid, load_owned, private_path, save
 
 sys.path.insert(0, str(ROOT / "src"))
-from stormlab.core import Manifest, SafetyError, response_target, summarize_trial, validate_actor_token
+from stormlab.core import Manifest, SafetyError, response_target, summarize_trial, validate_actor_token, configured_address_family
 from trial_state import begin_trial, finish_trial
 from storage_baseline import assert_storage_window
 import manual_executor_trial
+from lock_trial import fresh_readonly_lock
 from initial_token import acquire_initial_token, CredentialHTTPError, CredentialTransportError
 
 TOKEN_ACTIONS = {"sp-disable", "app-deactivate", "secret-remove"}
@@ -99,6 +100,8 @@ def validate_pairing(action: str, capability: str) -> None:
         raise SafetyError("Reader remains a healthy control; use arm-tag-write or listkeys to measure writer removal")
     if action == "manual-executor" and capability not in {"arm-tag-write", "listkeys"}:
         raise SafetyError("CORE09 measures arm-tag-write or listkeys against its direct writer assignment")
+    if action == "lock-readonly" and capability != "listkeys":
+        raise SafetyError("CORE11 measures the ReadOnly lock's control-plane ListKeys prevention only")
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -179,7 +182,7 @@ def main() -> int:
     parser.add_argument("--manifest", default="private/manifest.json")
     parser.add_argument("--subscription", required=True, type=guid)
     parser.add_argument("--confirm-lab-id", required=True, type=guid)
-    parser.add_argument("--action", required=True, choices=["none", "role-delete", "sp-disable", "app-deactivate", "secret-remove", "group-member-remove", "manual-executor"])
+    parser.add_argument("--action", required=True, choices=["none", "role-delete", "sp-disable", "app-deactivate", "secret-remove", "group-member-remove", "manual-executor", "lock-readonly"])
     parser.add_argument("--capability", choices=["arm-read", "arm-tag-write", "listkeys", "blob-read"], default="arm-tag-write")
     parser.add_argument("--storage-baseline-state", help="Required for blob-read: explicit prepared storage receipt covering the entire trial")
     parser.add_argument("--duration", type=int, help="Explicit post-action observation seconds, 20..7200; overrides the action default")
@@ -199,6 +202,8 @@ def main() -> int:
         parser.error(str(exc))
     interval = args.interval if args.interval is not None else 60 if window["mode"] == "until_token_expiry" else 10
     validate_pairing(args.action, args.capability)
+    if args.action == "lock-readonly" and args.role_assignment_id:
+        parser.error("CORE11 lock scope comes from the manifest storage account, not a role-assignment option")
     if args.capability == "blob-read" and not args.storage_baseline_state:
         parser.error("blob-read requires --storage-baseline-state")
     path, manifest = load_owned(args.manifest, args.subscription, args.confirm_lab_id)
@@ -215,9 +220,13 @@ def main() -> int:
     client_id = guid(actor["client_id"])
     guid(actor["service_principal_object_id"])
     if not args.execute:
-        print(json.dumps({"mode": "plan", "action": args.action, "credential_refresh": False,
-                          "baseline_seconds": args.baseline_seconds, "observation_window": window,
-                          "mutations": ["add temporary owned application credential", args.action, "remove temporary credential"]}))
+        plan = {"mode": "plan", "action": args.action, "credential_refresh": False,
+                "baseline_seconds": args.baseline_seconds, "observation_window": window,
+                "mutations": ["add temporary owned application credential", args.action, "remove temporary credential"]}
+        if args.action == "lock-readonly":
+            plan.update(lock_id=model.lock_id, lock_scope=model.storage_id, lock_level="ReadOnly",
+                        cleanup_policy="lock retained; separate explicit lock-remove required", interpretation="control_plane_prevention_only")
+        print(json.dumps(plan))
         return 0
     operator_token = graph_token(args.subscription)
     app_url = "https://graph.microsoft.com/v1.0/applications/" + app_id
@@ -233,6 +242,7 @@ def main() -> int:
     trial_manifest = dict(manifest)
     trial_path = private_path(str(run_dir / "manifest.json"))
     metadata = {"schema_version": 1, "run_id": run_id, "mode": "live", "action": canonical_action,
+                "transport_address_family": configured_address_family(), "credential_transport_address_family": "system",
                 "orchestration_action": args.action,
                 "response_transport": "guarded_logic_app" if args.action == "manual-executor" else "operator_harness",
                 "auth": "bearer", "credential_label": str(uuid.uuid4()), "action_target": target, "access_path": target["access_path"],
@@ -261,6 +271,11 @@ def main() -> int:
             metadata["storage_preparation"] = assert_storage_window(manifest, args.storage_baseline_state, time.time() + budget)
         begin_trial(manifest, run_id)
         lease_acquired = True
+        if args.action == "lock-readonly":
+            metadata["lock_trial"] = {"before_baseline": fresh_readonly_lock(manifest, args.subscription),
+                                      "interpretation": "control_plane_prevention_only", "identity_revocation_tested": False,
+                                      "lock_removal": "not_automatic; explicit harness lock-remove after trial"}
+            save(run_dir / "trial.json", metadata)
         assert_owned(manifest, args.subscription)
         credential_attempted = True
         metadata["credential_creation_attempted"] = True
@@ -312,6 +327,9 @@ def main() -> int:
         if args.capability == "blob-read":
             actual_window = observation_window(canonical_action, args.duration, args.until_token_expiry, frozen_claims["exp"])
             metadata["storage_preparation"] = assert_storage_window(manifest, args.storage_baseline_state, time.time() + actual_window["duration_seconds"] + 300)
+        if args.action == "lock-readonly":
+            metadata["lock_trial"]["before_action"] = fresh_readonly_lock(manifest, args.subscription)
+            save(run_dir / "trial.json", metadata)
         metadata["action_requested_at"] = datetime.now(timezone.utc).isoformat()
         save(run_dir / "trial.json", metadata)
         if args.action != "none":

@@ -22,7 +22,7 @@ import xml.etree.ElementTree as ET
 from lab_support import ROOT, private_path, save, assert_owned
 sys.path.insert(0, str(ROOT / "src"))
 from stormlab.core import (ARM, AzureCLI, Guard, HTTP, Manifest, SafetyError,
-                          load_json, respond, run_probe, signed_blob_headers, validate_actor_token, validate_sas)
+                          load_json, respond, run_probe, signed_blob_headers, validate_actor_token, validate_sas, configured_address_family)
 from stormlab.__main__ import append_jsonl
 from configure_access import DATA_READER, role_definition_id, verify_assignment, inventory
 from live_trial import request, graph_token, CredentialHTTPError
@@ -194,6 +194,7 @@ def run_cohort(data: dict, guard: Guard, folder: Path, action: str, ip: str, dur
     m = guard.m
     trial_id = folder.name
     receipt = {"schema_version": 1, "cohort_id": trial_id, "action": action, "status": "starting",
+               "transport_address_family": configured_address_family(), "credential_transport_address_family": "system",
                "lab_id": m.lab_id, "subscription_id": m.subscription_id, "storage_id": m.storage_id,
                "source_hashes": source_hashes(), "started_at": stamp(time.time()), "channels": list(CHANNELS),
                "credential_cleanup_verified": False, "action_invoked": False, "action_unambiguous": True}
@@ -280,6 +281,8 @@ def run_cohort(data: dict, guard: Guard, folder: Path, action: str, ip: str, dur
                     raise SafetyError("Fixed credential cannot cover observation; no response applied")
             if source_hashes() != receipt["source_hashes"]:
                 raise SafetyError("Source changed before response")
+            if configured_address_family() != receipt["transport_address_family"]:
+                raise SafetyError("Transport mode changed before response")
             receipt.update(status="action_pending", action_invoked=True, action_unambiguous=False)
             persist()
             action_receipt = respond(current_guard, action, execute=True, confirm_lab_id=m.lab_id)
@@ -298,6 +301,8 @@ def run_cohort(data: dict, guard: Guard, folder: Path, action: str, ip: str, dur
                 and not any(r.get("outcome") == "expired" for r in rows) for rows in after.values())
             for name in CHANNELS:
                 linked, summary = link(prepared, trial_id, before[name], [action_receipt], after[name])
+                if summary["transport_address_family"] != receipt["transport_address_family"]:
+                    raise SafetyError("Channel transport differs from the declared cohort")
                 save(folder / name / "linked.json", {"receipt": linked, "summary": summary,
                      "source_files": {key: hashlib.sha256(path.read_bytes()).hexdigest() for key, path in {
                          "baseline": folder/name/"baseline.jsonl", "action": folder/"action.jsonl", "post_action": folder/name/"post-action.jsonl"}.items()}})
@@ -380,11 +385,13 @@ def main(argv=None) -> int:
         "storage_id": m.storage_id, "action": a.action, "source_hashes": source_hashes(), "duration": a.duration, "interval": a.interval, "cohorts": []}
     if not path.exists():
         series["client_ip"] = a.client_ip
+        series["transport_address_family"] = configured_address_family()
     if any(series.get(k) != v for k, v in {"series_id": str(a.series_id), "lab_id": m.lab_id, "subscription_id": m.subscription_id, "storage_id": m.storage_id,
-                                          "action": a.action, "source_hashes": source_hashes(), "duration": a.duration, "interval": a.interval, "client_ip": a.client_ip}.items()):
+                                          "action": a.action, "source_hashes": source_hashes(), "duration": a.duration, "interval": a.interval, "client_ip": a.client_ip,
+                                          "transport_address_family": configured_address_family()}.items()):
         raise SafetyError("Series identity/configuration/source mismatch")
     if not a.execute:
-        print(json.dumps({"mode": "offline_plan", "action": a.action, "target_valid_trials": a.trials, "channels": list(CHANNELS), "duration": a.duration,
+        print(json.dumps({"mode": "offline_plan", "action": a.action, "target_valid_trials": a.trials, "channels": list(CHANNELS), "duration": a.duration, "transport_address_family": configured_address_family(),
                           "mutations_per_cohort": ["temporary single-IP/Shared Key baseline", "temporary owned app secret", a.action, "restore original closed settings", "remove temporary secret"],
                           "data_reader_granted": False, "cloud_calls": False}))
         return 0

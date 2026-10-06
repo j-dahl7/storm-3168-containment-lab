@@ -6,7 +6,7 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
@@ -47,6 +47,25 @@ def activity_row():
 
 
 class TelemetryTests(unittest.TestCase):
+    def test_ipv4_workspace_get_keeps_exact_id_tag_and_fresh_customer_id(self):
+        resource = {"id": telemetry.workspace_id(M), "tags": {"storm3168LabId": LAB}, "properties": {"customerId": CUSTOMER}}
+        guard = Mock(); guard.checked.return_value = resource
+        with patch.dict('os.environ', {'STORMLAB_ADDRESS_FAMILY':'ipv4'}), patch.object(telemetry, 'assert_context') as context, patch.object(telemetry, 'assert_owned'), patch.object(telemetry, 'AzureCLI'), patch.object(telemetry, 'Guard', return_value=guard), patch.object(telemetry, 'az') as az:
+            selected = telemetry.resolve_workspace(DATA, M, telemetry.workspace_id(M), owned=True)
+        az.assert_not_called()
+        context.assert_called_once_with(SUB, TENANT)
+        guard.read.assert_called_once_with('arm', telemetry.workspace_id(M) + '?api-version=2023-09-01')
+        self.assertEqual(selected['customer_id'], CUSTOMER)
+
+    def test_ipv4_workspace_get_rejects_foreign_live_id_or_missing_owned_tag(self):
+        for bad in ({"id": telemetry.workspace_id(M) + '-foreign', "tags": {"storm3168LabId": LAB}},
+                    {"id": telemetry.workspace_id(M), "tags": {}}):
+            guard = Mock(); guard.checked.return_value = {**bad, "properties": {"customerId": CUSTOMER}}
+            with self.subTest(bad=bad), patch.dict('os.environ', {'STORMLAB_ADDRESS_FAMILY':'ipv4'}), patch.object(telemetry, 'assert_context'), patch.object(telemetry, 'assert_owned'), patch.object(telemetry, 'AzureCLI'), patch.object(telemetry, 'Guard', return_value=guard), patch.object(telemetry, 'az') as az:
+                with self.assertRaises(RuntimeError):
+                    telemetry.resolve_workspace(DATA, M, telemetry.workspace_id(M), owned=True)
+                az.assert_not_called()
+
     def test_time_requires_utc_and_bound(self):
         now = datetime(2026, 10, 5, tzinfo=timezone.utc)
         for start, end in [

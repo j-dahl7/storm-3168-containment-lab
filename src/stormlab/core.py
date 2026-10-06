@@ -10,6 +10,7 @@ import math
 import os
 import re
 import shutil
+import socket
 import ssl
 import subprocess
 import time
@@ -363,12 +364,53 @@ class BoundedHTTPSResponse:
         return False
 
 
+def configured_address_family() -> str:
+    mode = os.environ.get("STORMLAB_ADDRESS_FAMILY", "system")
+    if mode not in {"system", "ipv4"}:
+        raise SafetyError("STORMLAB_ADDRESS_FAMILY must be system or ipv4")
+    return mode
+
+
+def ipv4_connection(address, timeout=socket._GLOBAL_DEFAULT_TIMEOUT, source_address=None):
+    """One DNS-selected IPv4 connection attempt; no request/alternate-IP retry."""
+    host, port = address
+    addresses = socket.getaddrinfo(host, port, socket.AF_INET, socket.SOCK_STREAM)
+    if not addresses:
+        raise OSError("No IPv4 address resolved")
+    family, kind, protocol, _, target = addresses[0]
+    if family != socket.AF_INET:
+        raise OSError("Resolver returned an unexpected address family")
+    sock = socket.socket(family, kind, protocol)
+    try:
+        if timeout is not socket._GLOBAL_DEFAULT_TIMEOUT:
+            sock.settimeout(timeout)
+        if source_address:
+            sock.bind(source_address)
+        sock.connect(target)
+        return sock
+    except BaseException:
+        sock.close()
+        raise
+
+
+class IPv4HTTPSConnection(http.client.HTTPSConnection):
+    """Keep HTTPSConnection's original hostname, SNI and certificate checks."""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._create_connection = ipv4_connection
+
+
 class DirectHTTPSOpener:
     """One direct TLS connection, no proxy lookup, redirect or auth retry.
 
     Keep .open(Request, timeout=...) injectable for existing tests and the raw
     Blob helper. TLS uses Python's default trusted context with hostname checks.
     """
+    def __init__(self, address_family: str | None = None):
+        self.address_family = configured_address_family() if address_family is None else address_family
+        if self.address_family not in {"system", "ipv4"}:
+            raise SafetyError("Unsupported transport address family")
+
     def open(self, request: urllib.request.Request, timeout: float = 20) -> BoundedHTTPSResponse:
         if not isinstance(request, urllib.request.Request):
             raise SafetyError("The transport accepts an explicit HTTPS Request only")
@@ -387,7 +429,8 @@ class DirectHTTPSOpener:
         context = ssl.create_default_context()
         if context.verify_mode != ssl.CERT_REQUIRED or context.check_hostname is not True:
             raise SafetyError("Trusted certificate and hostname verification are required")
-        connection = http.client.HTTPSConnection(parsed.hostname, port=443, timeout=timeout, context=context)
+        connector = IPv4HTTPSConnection if self.address_family == "ipv4" else http.client.HTTPSConnection
+        connection = connector(parsed.hostname, port=443, timeout=timeout, context=context)
         target = parsed.path or "/"
         if parsed.query:
             target += "?" + parsed.query
@@ -403,7 +446,8 @@ class HTTP:
     """No redirects, implicit auth, proxy auth, or retries. Bounded response size."""
     def __init__(self, timeout: int = 20):
         self.timeout = timeout
-        self.opener = DirectHTTPSOpener()
+        self.address_family = configured_address_family()
+        self.opener = DirectHTTPSOpener(self.address_family)
 
     def request(self, method: str, url: str, headers: dict | None = None, body: dict | None = None) -> Response:
         validated_https_endpoint(url)
@@ -510,6 +554,14 @@ def service_code(response: Response) -> str:
         except (ValueError, AttributeError):
             pass
     return candidate if isinstance(candidate, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,120}", candidate) else ""
+
+
+def response_uuid(headers: dict | None, name: str) -> str:
+    value = next((v for k, v in (headers or {}).items() if k.lower() == name.lower()), None)
+    try:
+        return guid(value, "response identifier")
+    except SafetyError:
+        return ""
 
 
 def classify(response: Response, expired: bool = False, *, auth: str | None = None) -> str:
@@ -743,7 +795,8 @@ def respond(guard: Guard, action: str, *, execute: bool = False, confirm_lab_id:
     else:
         service, path = "arm", m.storage_id + "?api-version=2023-05-01"
         body = {"properties": {"allowSharedKeyAccess": False}}
-    result = {"schema_version": 1, "kind": "response", "action": action, "target": response_target(m, action, assignment_id), "timestamp": utc_now(), "executed": execute, "status": "planned"}
+    result = {"schema_version": 1, "kind": "response", "action": action, "target": response_target(m, action, assignment_id), "timestamp": utc_now(), "executed": execute, "status": "planned",
+              "transport_address_family": getattr(guard.http, "address_family", "unrecorded")}
     if not execute:
         return result
     response = guard.mutation(service, method, path, body, validator)
@@ -886,7 +939,11 @@ def probe_once(m: Manifest, http: HTTP, guard: Guard, capability: str, credentia
     result["mutation_attempted"] = capability == "arm-tag-write"
     response = http.request(method, url, headers, body)
     result["response_received_at"] = utc_now()
-    result.update(http_status=response.status, service_code=service_code(response), outcome=classify(response, auth=auth), request_id=(response.headers or {}).get("x-ms-request-id", ""))
+    result.update(http_status=response.status, service_code=service_code(response), outcome=classify(response, auth=auth),
+                  request_id=(response.headers or {}).get("x-ms-request-id", ""), correlation_id=response_uuid(response.headers, "x-ms-correlation-request-id"))
+    client_id = response_uuid(headers, "x-ms-client-request-id")
+    if client_id:
+        result["client_request_id"] = client_id
     if capability == "arm-tag-write" and result["outcome"] == "allowed":
         verification = http.request("GET", ARM + m.storage_id + "?api-version=2023-05-01", {"Authorization": "Bearer " + credential})
         try:
@@ -924,7 +981,8 @@ def run_probe(m: Manifest, http: HTTP, guard: Guard, capability: str, credential
     monotonic = monotonic or (time.monotonic if clock is time.time else clock)
     start = monotonic()
     label, run_id = guid(credential_label, "credential_label") if credential_label is not None else str(uuid.uuid4()), str(uuid.uuid4())
-    emit({"schema_version": 1, "kind": "run_start", "timestamp": utc_now(), "run_id": run_id, "credential_label": label, "capability": capability, "auth": auth, "duration_seconds": duration, "interval_seconds": interval, "scheduler": "monotonic_targets", "token_metadata": {k: c.get(k) for k in ("aud", "iat", "exp")} if c else {}})
+    family = getattr(http, "address_family", "unrecorded")
+    emit({"schema_version": 1, "kind": "run_start", "timestamp": utc_now(), "run_id": run_id, "credential_label": label, "capability": capability, "auth": auth, "duration_seconds": duration, "interval_seconds": interval, "scheduler": "monotonic_targets", "transport_address_family": family, "token_metadata": {k: c.get(k) for k in ("aud", "iat", "exp")} if c else {}})
     limit = int(duration // interval) + 1
     initial_verified = False
     status = "failed_or_incomplete"
@@ -950,7 +1008,7 @@ def run_probe(m: Manifest, http: HTTP, guard: Guard, capability: str, credential
                 except TransientReadError as exc:
                     row = {"schema_version": 1, "kind": "probe", "timestamp": utc_now(), "capability": capability, "auth": auth,
                            "outcome": "guard_read_inconclusive", "probe_stage": "operator_guard", "http_status": exc.status, "mutation_attempted": False}
-            row.update(run_id=run_id, credential_label=label, elapsed_seconds=round(elapsed, 3), scheduled_elapsed_seconds=n * interval, sequence=n)
+            row.update(run_id=run_id, credential_label=label, elapsed_seconds=round(elapsed, 3), scheduled_elapsed_seconds=n * interval, sequence=n, transport_address_family=family)
             emit(row)
             if row["outcome"] == "expired":
                 break
@@ -1051,9 +1109,9 @@ def summarize(rows: list[dict]) -> dict:
     runs: dict[tuple, list[dict]] = {}
     for row in rows:
         if row.get("kind") == "probe":
-            identity = (str(row.get("run_id", "unlabeled")), row.get("capability"), row.get("auth"), row.get("credential_label"))
+            identity = (str(row.get("run_id", "unlabeled")), row.get("capability"), row.get("auth"), row.get("credential_label"), row.get("transport_address_family", "unrecorded"))
             runs.setdefault(identity, []).append(row)
-    output = [{"run_id": identity[0], "capability": identity[1], "auth": identity[2], "credential_label": identity[3], **observation_summary(probes)}
+    output = [{"run_id": identity[0], "capability": identity[1], "auth": identity[2], "credential_label": identity[3], "transport_address_family": identity[4], **observation_summary(probes)}
               for identity, probes in runs.items()]
     return {"schema_version": 1, "evidence_type": "offline_demo" if rows and all(r.get("simulated") for r in rows) else "recorded_observations", "status": "observed" if output else "not_tested", "runs": output}
 
@@ -1071,6 +1129,9 @@ def evidence_time(value: Any) -> float:
 def summarize_trial(receipt: dict, baseline_rows: list[dict], action_rows: list[dict], post_rows: list[dict]) -> dict:
     """Stitch only the exact recorded credential/capability across two phases."""
     capability, auth = receipt.get("capability"), receipt.get("auth")
+    family = receipt.get("transport_address_family", "unrecorded")
+    if family not in {"system", "ipv4", "unrecorded"}:
+        raise SafetyError("Unsupported recorded transport family")
     label = guid(receipt.get("credential_label"), "trial credential_label")
     if capability not in CAPABILITIES or auth not in {"bearer", "shared-key", "sas"} or receipt.get("token_refresh") is not False:
         raise SafetyError("Trial identity or frozen credential contract is missing")
@@ -1103,6 +1164,8 @@ def summarize_trial(receipt: dict, baseline_rows: list[dict], action_rows: list[
         starts = [row for row in rows if row.get("kind") == "run_start"]
         if len(starts) != 1:
             raise SafetyError("Trial phase requires exactly one run receipt")
+        if starts[0].get("transport_address_family", "unrecorded") != family:
+            raise SafetyError("Trial phase transport family differs from the receipt")
         expected_run = receipt.get("probe_runs", {}).get(phase_name)
         if not expected_run or starts[0].get("run_id") != expected_run:
             raise SafetyError("Trial run receipt mismatch")
@@ -1113,7 +1176,7 @@ def summarize_trial(receipt: dict, baseline_rows: list[dict], action_rows: list[
         for row in rows:
             if row.get("kind") not in {"probe", "run_start"}:
                 continue
-            if (row.get("run_id") != expected_run or row.get("capability") != capability or
+            if (row.get("transport_address_family", "unrecorded") != family or row.get("run_id") != expected_run or row.get("capability") != capability or
                     row.get("auth") != auth or row.get("credential_label") != label):
                 raise SafetyError("Trial phase credential or capability mismatch")
             if row.get("kind") == "probe":
@@ -1133,7 +1196,7 @@ def summarize_trial(receipt: dict, baseline_rows: list[dict], action_rows: list[
         raise SafetyError("Trial requires two successful baseline probes")
     result = observation_summary(post, baseline_allowed=True, last_allowed=allowed[-1]["elapsed_seconds"])
     return {"schema_version": 1, "evidence_type": "trial_observations", "status": "observed" if post else "not_tested",
-            "trial_id": receipt.get("run_id"), "capability": capability, "auth": auth, "credential_label": label,
+            "trial_id": receipt.get("run_id"), "capability": capability, "auth": auth, "credential_label": label, "transport_address_family": family,
             "action": action, "access_path": receipt.get("access_path"), "action_target_recorded": bool(receipt.get("action_target")),
             "observation_window": {key: receipt.get("observation_window", {}).get(key) for key in ("mode", "duration_seconds", "maximum_seconds", "expiry_margin_seconds", "expiry_window_capped")},
             "action_configuration_verified": configuration_verified, "time_origin": "action_acknowledged_at" if action != "none" else "no_action_marker",

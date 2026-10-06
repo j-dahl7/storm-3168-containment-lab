@@ -32,7 +32,7 @@
       "phase": 2,
       "action": "direct-role-delete",
       "credential_class": "fixed_arm_token",
-      "capability": "arm-tag-write with separate Reader retained",
+      "capability": "listkeys with separate Reader retained",
       "action_configurations": [
         {
           "configuration": "direct-role-delete",
@@ -51,7 +51,7 @@
       "phase": 2,
       "action": "group-role-assignment-delete",
       "credential_class": "fixed_arm_token",
-      "capability": "arm-tag-write with separate Reader retained",
+      "capability": "listkeys with separate Reader retained",
       "action_configurations": [
         {
           "configuration": "group-role-assignment-delete",
@@ -70,7 +70,7 @@
       "phase": 2,
       "action": "group-member-remove",
       "credential_class": "fixed_arm_token",
-      "capability": "arm-tag-write with separate Reader retained",
+      "capability": "listkeys with separate Reader retained",
       "action_configurations": [
         {
           "configuration": "group-member-remove",

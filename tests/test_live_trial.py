@@ -82,7 +82,7 @@ class LiveTrialProtocolTests(unittest.TestCase):
                     count = baseline_count if output.name == "baseline.jsonl" else 1
                     run = str(uuid.uuid4())
                     identity = {"run_id": run, "credential_label": arguments[arguments.index("--credential-label") + 1],
-                                "capability": capability, "auth": "bearer"}
+                                "capability": capability, "auth": "bearer", "transport_address_family": live_trial.configured_address_family()}
                     claims = claims_from_token(env["STORMLAB_PROBE_TOKEN"])
                     rows = [{"kind": "run_start", "token_metadata": {key: claims.get(key) for key in ("aud", "iat", "exp")}, **identity}]
                     for n in range(count):
@@ -136,6 +136,7 @@ class LiveTrialProtocolTests(unittest.TestCase):
                  patch.object(live_trial, "assert_owned"), patch.object(live_trial, "graph_token", return_value="operator-only"), \
                  patch.object(live_trial, "begin_trial"), patch.object(live_trial, "finish_trial") as finished, \
                  patch.object(live_trial, "assert_storage_window", return_value={"valid": True}) as prepared, \
+                 patch.object(live_trial, "fresh_readonly_lock", return_value={"lock_id": Manifest.from_dict(manifest).lock_id, "scope": Manifest.from_dict(manifest).storage_id, "expected_level": "ReadOnly", "ownership_notes": "storm3168LabId=" + LAB, "absence_verified": True}) as lock_checks, \
                  patch.object(live_trial, "request", side_effect=request), patch.object(live_trial, "invoke_harness", side_effect=harness), \
                  patch.object(live_trial, "acquire_initial_token", side_effect=bounded_initial), \
                  patch.object(live_trial.manual_executor_trial, "load_bound_state", return_value=(Path(temp) / "responder.json", {}, executor_target)), \
@@ -150,6 +151,7 @@ class LiveTrialProtocolTests(unittest.TestCase):
                     state["failure_type"] = type(exc).__name__
                 state["finish_cleanup_confirmed"] = finished.call_args.kwargs["cleanup_confirmed"]
                 state["storage_checks"] = prepared.call_count
+                state["lock_checks"] = lock_checks.call_count
             receipt_path = next((Path(temp) / "runs").rglob("trial.json"))
             receipt_text = receipt_path.read_text()
             self.assertNotIn("fictional-in-memory-secret", receipt_text)
@@ -168,6 +170,16 @@ class LiveTrialProtocolTests(unittest.TestCase):
         self.assertNotEqual(state["issued"][0], state["issued"][1])
         self.assertEqual(receipt["separate_new_token_check"]["status"], "issued")
         self.assertTrue(receipt["action_receipt"]["postcondition_verified"])
+
+    def test_core11_checks_freshness_twice_and_keeps_same_token_without_unlock(self):
+        state, receipt, failure = self.exercise(action='lock-readonly', capability='listkeys')
+        self.assertIsNone(failure)
+        self.assertEqual(state['lock_checks'], 2)
+        self.assertEqual(state['tokens'], [state['issued'][0], state['issued'][0]])
+        self.assertEqual(receipt['action_receipt']['action'], 'lock-readonly')
+        self.assertEqual(receipt['lock_trial']['interpretation'], 'control_plane_prevention_only')
+        self.assertFalse(receipt['lock_trial']['identity_revocation_tested'])
+        self.assertEqual(receipt['lock_trial']['before_baseline']['lock_id'], receipt['lock_trial']['before_action']['lock_id'])
 
     def test_initial_transient_retries_freeze_one_token_and_cleanup_once(self):
         errors = [CredentialTransportError(), CredentialHTTPError(429, "temporarily_unavailable", []), CredentialHTTPError(401, "invalid_client", [7000215])]

@@ -119,6 +119,48 @@ class ResultsBuilderTests(unittest.TestCase):
         self.assertEqual(len(report["aggregates"]), 3)
         self.assertTrue(all(row["median_observed_interval_seconds"] is None for row in report["aggregates"]))
 
+    def test_transport_families_are_public_and_never_combined(self):
+        paths = [self.trial() for _ in range(3)]
+        for path, family in zip(paths, ('unrecorded', 'system', 'ipv4')):
+            receipt = json.loads(path.read_text())
+            receipt['transport_address_family'] = family
+            receipt['action_receipt']['transport_address_family'] = family
+            path.write_text(json.dumps(receipt))
+            for filename in ('baseline.jsonl', 'action.jsonl', 'post-action.jsonl'):
+                rows = [json.loads(line) for line in (path.parent / filename).read_text().splitlines() if line.strip()]
+                for row in rows:
+                    row['transport_address_family'] = family
+                (path.parent / filename).write_text('\n'.join(json.dumps(row) for row in rows))
+        report, _ = builder.build_report(paths, self.approve(paths))
+        self.assertEqual({row['transport_address_family'] for row in report['accepted_trials']}, {'unrecorded', 'system', 'ipv4'})
+        self.assertEqual(len(report['aggregates']), 3)
+        self.assertTrue(all(row['median_observed_interval_seconds'] is None for row in report['aggregates']))
+
+    def test_core11_requires_fresh_exact_lock_and_reports_prevention_only(self):
+        path = self.trial(action='lock-readonly', outcomes=[(0, 'lock_denied'), (30, 'lock_denied'), (60, 'lock_denied')])
+        receipt = json.loads(path.read_text())
+        m = Manifest.from_dict(fixture())
+        evidence = {'lock_id': m.lock_id, 'scope': m.storage_id, 'expected_level': 'ReadOnly',
+                    'ownership_notes': 'storm3168LabId=' + m.lab_id, 'absence_verified': True}
+        receipt.update(capability='listkeys', lock_trial={'before_baseline': evidence, 'before_action': evidence,
+                       'interpretation': 'control_plane_prevention_only', 'identity_revocation_tested': False})
+        path.write_text(json.dumps(receipt))
+        for filename in ('baseline.jsonl', 'post-action.jsonl'):
+            rows = [json.loads(line) for line in (path.parent / filename).read_text().splitlines() if line.strip()]
+            for row in rows:
+                if row['kind'] in {'run_start', 'probe'}:
+                    row['capability'] = 'listkeys'
+            (path.parent / filename).write_text('\n'.join(json.dumps(row) for row in rows))
+        report, _ = builder.build_report([path], self.approve([path]))
+        self.assertEqual(report['accepted_trials'][0]['case'], 'CORE11')
+        self.assertEqual(report['accepted_trials'][0]['interpretation'], 'control_plane_prevention_only')
+        self.assertFalse(report['accepted_trials'][0]['identity_revocation_tested'])
+        receipt['lock_trial']['before_action'] = {**evidence, 'absence_verified': False}
+        path.write_text(json.dumps(receipt))
+        report, _ = builder.build_report([path], self.approve([path]))
+        self.assertEqual(report['accepted_trials'], [])
+        self.assertIn('lock_freshness_or_scope_unverified', report['rejected_trials'][0]['reasons'])
+
     def test_evidence_change_after_operator_review_is_rejected(self):
         path = self.trial()
         review = self.approve([path])

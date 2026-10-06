@@ -1,6 +1,7 @@
 """Read-only, bounded provider telemetry export. No diagnostic settings are changed."""
 from __future__ import annotations
 import argparse
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 import ipaddress
 import json
@@ -11,7 +12,7 @@ import sys
 
 from lab_support import ROOT, assert_context, assert_owned, az, guid, private_path
 sys.path.insert(0, str(ROOT / "src"))
-from stormlab.core import Manifest, SafetyError, load_json
+from stormlab.core import Manifest, SafetyError, load_json, AzureCLI, Guard, HTTP, configured_address_family
 
 MAX_WINDOW = timedelta(hours=24)
 MAX_ROWS = 5000
@@ -74,8 +75,17 @@ def resolve_workspace(data: dict, manifest: Manifest, selected_id: str, *, owned
     # Existing identity workspace may be in another subscription, but never another tenant.
     assert_context(selected_sub, manifest.tenant_id)
     assert_owned(data, manifest.subscription_id)
-    live = az("monitor", "log-analytics", "workspace", "show",
-              "--ids", selected_id, "--subscription", selected_sub)
+    if configured_address_family() == "ipv4":
+        # An explicitly selected identity workspace may be in another SAME-
+        # tenant subscription. This model is only an operator GET context;
+        # no ownership/mutation method is called for the external workspace.
+        credential_context = manifest if selected_sub == manifest.subscription_id else replace(manifest, subscription_id=selected_sub)
+        guard = Guard(credential_context, HTTP(), AzureCLI(credential_context, selected_sub))
+        resource = guard.checked(guard.read("arm", selected_id + "?api-version=2023-09-01"))
+        live = {**resource, "customerId": resource.get("properties", {}).get("customerId")}
+    else:
+        live = az("monitor", "log-analytics", "workspace", "show",
+                  "--ids", selected_id, "--subscription", selected_sub)
     if not isinstance(live, dict) or str(live.get("id", "")).lower() != selected_id.lower():
         raise RuntimeError("Live workspace resource identity mismatch")
     if owned and (not isinstance(live.get("tags"), dict)

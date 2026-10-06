@@ -120,7 +120,7 @@ class StorageTrialTests(unittest.TestCase):
             def parallel(m, channels, folder, phase, duration, interval):
                 results = {}
                 for name, ch in channels.items():
-                    identity = {"run_id": name + phase, "capability": "blob-read", "auth": ch["auth"], "credential_label": ch["label"]}
+                    identity = {"run_id": name + phase, "capability": "blob-read", "auth": ch["auth"], "credential_label": ch["label"], "transport_address_family": trial.configured_address_family()}
                     rows = [{"kind": "run_start", **identity, "token_metadata": {k: token_payload[k] for k in ("aud", "iat", "exp")} if ch["auth"] == "bearer" else {}}]
                     offsets = [-60, -40, -20] if phase == "baseline" else [0, 30, 60]
                     for offset in offsets:

@@ -78,7 +78,23 @@ def assert_owned(manifest: dict, subscription: str) -> dict:
     if not re.fullmatch(r"nls-storm3168-[a-f0-9]{8}", name):
         raise RuntimeError("This setup helper only manages its generated lab resource groups")
     assert_context(subscription, manifest["tenant_id"])
-    group = az("group", "show", "--subscription", subscription, "--name", name)
+    sys.path.insert(0, str(ROOT / "src"))
+    from stormlab.core import configured_address_family
+    if configured_address_family() == "ipv4":
+        from stormlab.core import Manifest, AzureCLI, Guard, HTTP
+        # Setup can hold a deliberately partial app-only actor receipt before
+        # the SP exists. That does not authorize any actor mutation here.
+        model_data = dict(manifest)
+        actor = model_data.get("actor")
+        if actor and "service_principal_object_id" not in actor:
+            if model_data.get("role_assignments") or model_data.get("owned_secret_key_id"):
+                raise RuntimeError("Incomplete actor has unexpected grant/credential records")
+            model_data.pop("actor")
+        model = Manifest.from_dict(model_data)
+        guard = Guard(model, HTTP(), AzureCLI(model, subscription))
+        group = guard.checked(guard.read("arm", rg_id(manifest) + "?api-version=2021-04-01"))
+    else:
+        group = az("group", "show", "--subscription", subscription, "--name", name)
     if group.get("id", "").lower() != rg_id(manifest).lower():
         raise RuntimeError("Resource group identity mismatch")
     if group.get("tags", {}).get("storm3168LabId") != guid(manifest["lab_id"]):

@@ -29,12 +29,44 @@ Token-bound trials now give the temporary secret a three-hour expiry so its
 automatic expiration does not become a second change during a two-hour observation.
 The secret is still removed in cleanup; no credential is saved to a file.
 
-## Repeated measurements
+## Current measurements, 2026-10-06 UTC
 
-No new containment series is accepted at this checkpoint. The next step is one
-supervised fixed-token pilot against the reviewed transport revision, followed
-by independent repetitions if its baseline, action, observation and cleanup all
-validate. Source files remain frozen during every trial.
+CORE05-A is one operator-reviewed completed observation at source
+`b3d4541f1567d2722eb671eccd6231f3f5d6ccd0`. After verified service-principal
+disablement, the fixed ARM token produced 35 successful ListKeys responses.
+The last successful request began 3,420.9 seconds after the action acknowledgment.
+There were also 23 inconclusive post-action samples. No qualified denial was
+observed before the harness stopped locally at the token's recorded expiry;
+the final successful request preceded that expiry by about 50 seconds. This is
+a censored observation, not a measured revocation time or continuous access
+through every gap. Temporary credential cleanup and unchanged source were verified.
+
+A separate one-shot token request immediately after disablement returned a token.
+It was discarded and never substituted into the measurement. That check does
+not establish when issuance stopped. Two independent replica observations are
+still running; no three-trial action series is accepted at this checkpoint.
+
+The additional Activity Log export is working. Forty unique successful ListKeys
+events from the exact principal/account fell inside CORE05-A's window, matching
+the 40 successful baseline/post-action responses by count. A one-to-one request
+join has not been established. Event-to-ingestion delays were 103.7-626.0 seconds
+(median 369.5 seconds), descriptive event statistics from one trial, not alert or
+containment timing. Actual rows populated `_ResourceId` while `ResourceId` was
+empty. The corrected detector/workbook aliases the standard field before scope
+filtering. Separately, all 26 synthetic service checks passed (25 cases and a
+full-batch check); native incident creation remains untested.
+
+Unauthenticated route diagnostics found repeated IPv6 TLS resets while IPv4
+completed certificate-verified connections. The explicit IPv4 option records its
+mode and preserves trusted TLS, host allowlists and no probe retries. The running
+replicas retain their original source/transport; no results are backfilled.
+See [transport protocol](transport-address-family.md).
+
+Before the writer-removal runs, CORE02/03/04 were explicitly changed from tag
+writes to ListKeys with a separate Reader grant retained. This tests an operation
+authorized by the writer role without a read/merge/write sequence. Retaining the
+Reader assignment is not a claim that a paired fixed-token Reader probe was run.
+Source and cloud configuration stay frozen throughout each observation.
 
 The storage runner automates six parallel credential channels per cohort and one
 response. All six nonce/checksum baselines must pass first. A guarded executor

@@ -26,12 +26,13 @@ def link(data: dict, trial_id: str, baseline: list[dict], actions: list[dict], p
     if any(len(rows) != 1 for rows in starts):
         raise SafetyError("Each channel phase needs exactly one raw run receipt")
     first, second = starts[0][0], starts[1][0]
-    for field in ("capability", "auth", "credential_label"):
+    for field in ("capability", "auth", "credential_label", "transport_address_family"):
         if first.get(field) != second.get(field):
             raise SafetyError("Baseline and post-action channel identities differ")
     if first.get("capability") != "blob-read":
         raise SafetyError("Phase 3 links only canary blob reads")
     receipt = {"schema_version": 1, "run_id": trial_id, "capability": "blob-read", "auth": first.get("auth"),
+               "transport_address_family": first.get("transport_address_family", "unrecorded"),
                "credential_label": first.get("credential_label"), "token_refresh": False,
                "action": action["action"], "action_target": action["target"], "access_path": action["target"]["access_path"],
                "action_requested_at": action.get("request_started_at"), "action_returned_at": action.get("acknowledged_at"),
