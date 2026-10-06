@@ -1,0 +1,13 @@
+# Initial token acquisition and credential lifetime
+
+live_trial.py and storage_trial.py share a bounded acquisition helper **only before a probe token is frozen**. The maximum budget is 300 seconds using a monotonic clock. Each request timeout is the smaller of 30 seconds and the remaining budget; a response arriving after the budget is rejected. An in-flight operating-system/network operation can still overrun its requested timeout, so the budget is not an Azure-side timer.
+
+Retryable conditions are transport failures, HTTP 429, HTTP 5xx, and the specific invalid_client / AADSTS7000215 secret-propagation error. Other authentication/authorization failures, malformed responses and TLS certificate-validation failures stop the trial. There are at most 32 attempts; the elapsed budget normally stops earlier. Propagation waits are 15 seconds; transient-service waits increase from 5 seconds to at most 30 seconds. All waits are bounded by the remaining budget.
+
+The private receipt records each attempt's number, sanitized status/error codes, times, requested timeout, delay and terminal reason. It never records provider descriptions, request bodies, client secrets or returned tokens. A lost response may mean the server issued a token the client never received. The contract is **one successfully received and validated frozen probe token**, not a claim that the server issued only one token.
+
+After acquisition succeeds, baseline and post-action probes reuse that exact credential without refresh. The optional post-action new-token check remains one request with its own evidence; it does not use this retry helper or replace the probe token. Graph mutations, containment actions and key rotations are not retried by this helper. Initial acquisition failure prevents baseline/response and still runs exact temporary-secret cleanup.
+
+The ARM/CORE12/manual-executor runner creates its temporary secret with a **three-hour expiry** and records only the expiry time and key ID. This covers the five-minute acquisition budget, baseline, the two-hour maximum observation and cleanup margin. A one-hour secret expiry could otherwise become an unintended second change during a long sign-in-disable or no-action trial. The secret remains memory-only and is removed in finally; the longer expiry is a fallback lifetime, not a reason to retain it after the run.
+
+Short storage cohorts retain their one-hour temporary-secret expiry, which covers their five-minute acquisition budget and bounded 15-minute maximum post-action window. Source tests validate retry selection, deadline handling, single frozen-token reuse, one-shot new-token checks and cleanup after failure; they do not establish live token issuance or propagation times.

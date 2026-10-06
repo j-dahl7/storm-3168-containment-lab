@@ -8,6 +8,7 @@ This is live cloud work, not a fixture runner. No full-incident containment clai
 from __future__ import annotations
 import argparse
 import hashlib
+import http.client
 from datetime import datetime, timedelta, timezone
 import json
 import math
@@ -15,6 +16,7 @@ import os
 import pathlib
 import re
 import subprocess
+import ssl
 import sys
 import time
 import urllib.error
@@ -28,6 +30,7 @@ from stormlab.core import Manifest, SafetyError, response_target, summarize_tria
 from trial_state import begin_trial, finish_trial
 from storage_baseline import assert_storage_window
 import manual_executor_trial
+from initial_token import acquire_initial_token, CredentialHTTPError, CredentialTransportError
 
 TOKEN_ACTIONS = {"sp-disable", "app-deactivate", "secret-remove"}
 
@@ -103,14 +106,10 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-class CredentialHTTPError(RuntimeError):
-    def __init__(self, status, code, numeric_codes):
-        self.status, self.code, self.numeric_codes = status, code, numeric_codes
-        super().__init__(f"Credential operation returned HTTP {status}; code={code}; numeric_codes={numeric_codes}")
-
-
 def request(method: str, url: str, token: str | None = None, payload: dict | None = None,
-            form: dict | None = None) -> dict:
+            form: dict | None = None, *, request_timeout: float = 30) -> dict:
+    if type(request_timeout) not in {int, float} or not math.isfinite(request_timeout) or not 0 < request_timeout <= 30:
+        raise ValueError("Credential request timeout must be positive and at most 30 seconds")
     parsed = urllib.parse.urlsplit(url)
     if parsed.scheme != "https" or parsed.hostname not in {"graph.microsoft.com", "login.microsoftonline.com"}:
         raise ValueError("Disallowed credential-operation endpoint")
@@ -126,7 +125,7 @@ def request(method: str, url: str, token: str | None = None, payload: dict | Non
         headers["Content-Type"] = "application/json"
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
-        with urllib.request.build_opener(NoRedirect).open(req, timeout=30) as response:
+        with urllib.request.build_opener(NoRedirect).open(req, timeout=request_timeout) as response:
             raw = response.read(1024 * 1024)
             return json.loads(raw) if raw else {}
     except urllib.error.HTTPError as exc:
@@ -139,11 +138,17 @@ def request(method: str, url: str, token: str | None = None, payload: dict | Non
             if isinstance(candidate, str) and re.fullmatch(r"[A-Za-z0-9_.-]{1,100}", candidate):
                 code = candidate
             numbers = [value for value in error_data.get("error_codes", []) if type(value) is int][:5]
-        except (ValueError, AttributeError, TypeError):
+        except (ValueError, AttributeError, TypeError, OSError, http.client.HTTPException):
             pass
         raise CredentialHTTPError(exc.code, code, numbers) from None
-    except urllib.error.URLError:
-        raise RuntimeError("Credential operation transport failure") from None
+    except urllib.error.URLError as exc:
+        if isinstance(exc.reason, ssl.SSLCertVerificationError):
+            raise RuntimeError("Credential TLS certificate verification failed") from None
+        raise CredentialTransportError() from None
+    except ssl.SSLCertVerificationError:
+        raise RuntimeError("Credential TLS certificate verification failed") from None
+    except (OSError, TimeoutError, http.client.HTTPException):
+        raise CredentialTransportError() from None
 
 
 def graph_token(subscription: str) -> str:
@@ -261,9 +266,14 @@ def main() -> int:
         metadata["credential_creation_attempted"] = True
         metadata["credential_display_name"] = credential_name
         save(run_dir / "trial.json", metadata)
+        # Keep secret expiry outside the acquisition + maximum observation +
+        # cleanup window, so expiry is not an unintended second intervention.
+        secret_expires = (datetime.now(timezone.utc) + timedelta(hours=3)).isoformat()
+        metadata.update(temporary_credential_ttl_seconds=10800, temporary_credential_expires_at=secret_expires)
+        save(run_dir / "trial.json", metadata)
         credential = request("POST", app_url + "/addPassword", operator_token,
                              {"passwordCredential": {"displayName": credential_name,
-                             "endDateTime": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat()}})
+                             "endDateTime": secret_expires}})
         credential_id = guid(credential["keyId"])
         metadata["credential_key_id"] = credential_id  # Identifier only; never secretText.
         save(run_dir / "trial.json", metadata)
@@ -271,24 +281,21 @@ def main() -> int:
         metadata["action_target"] = response_target(Manifest.from_dict(trial_manifest), canonical_action, args.role_assignment_id)
         save(trial_path, trial_manifest)
         client_secret = credential["secretText"]
-        # Bounded initial issuance only. No token has been frozen yet; this is
-        # NOT a probe retry or refresh. Retain failures in the private receipt.
-        for attempt in range(4):
-            metadata["initial_token_attempts"] = attempt + 1
+        def record_initial_attempt(row):
+            metadata["initial_token_attempts"] = row["attempt"]
+            records = metadata.setdefault("initial_token_acquisition", [])
+            if records and records[-1]["attempt"] == row["attempt"]:
+                records[-1] = row
+            else:
+                records.append(row)
             save(run_dir / "trial.json", metadata)
-            try:
-                token_response = request("POST", f"https://login.microsoftonline.com/{guid(manifest['tenant_id'])}/oauth2/v2.0/token",
-                                         form={"grant_type": "client_credentials", "client_id": client_id,
-                                               "client_secret": client_secret, "scope": token_scope})
-                break
-            except CredentialHTTPError as exc:
-                if exc.status != 401 or exc.code != "invalid_client" or 7000215 not in exc.numeric_codes or attempt == 3:
-                    raise
-                time.sleep(15)
-        credential.clear()
-        frozen_token = token_response["access_token"]
-        token_response.clear()
-        frozen_claims = validate_actor_token(frozen_token, model, audience)
+        try:
+            frozen_token, frozen_claims = acquire_initial_token(
+                lambda timeout: request("POST", f"https://login.microsoftonline.com/{guid(manifest['tenant_id'])}/oauth2/v2.0/token",
+                    form={"grant_type": "client_credentials", "client_id": client_id, "client_secret": client_secret, "scope": token_scope}, request_timeout=timeout),
+                validate=lambda value: validate_actor_token(value, model, audience), record=record_initial_attempt)
+        finally:
+            credential.clear()
         metadata["frozen_token_metadata"] = {key: frozen_claims.get(key) for key in ("aud", "iat", "exp")}
         env = dict(os.environ)
         env["PYTHONPATH"] = str(ROOT / "src")

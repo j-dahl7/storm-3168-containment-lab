@@ -26,6 +26,7 @@ from stormlab.core import (ARM, AzureCLI, Guard, HTTP, Manifest, SafetyError,
 from stormlab.__main__ import append_jsonl
 from configure_access import DATA_READER, role_definition_id, verify_assignment, inventory
 from live_trial import request, graph_token, CredentialHTTPError
+from initial_token import acquire_initial_token
 from phase3_link import link
 from storage_baseline import (API, account, client_ip, initial_settings, prepare, settings,
                               storage_request, assert_storage_window)
@@ -227,21 +228,21 @@ def run_cohort(data: dict, guard: Guard, folder: Path, action: str, ip: str, dur
             credential_id = str(uuid.UUID(secret["keyId"]))
             receipt["credential_key_id"] = credential_id
             persist()
+            def record_initial_attempt(row):
+                receipt["initial_token_attempts"] = row["attempt"]
+                rows = receipt.setdefault("initial_token_acquisition", [])
+                if rows and rows[-1]["attempt"] == row["attempt"]:
+                    rows[-1] = row
+                else:
+                    rows.append(row)
+                persist()
             try:
-                for attempt in range(4):
-                    try:
-                        result = request("POST", "https://login.microsoftonline.com/" + m.tenant_id + "/oauth2/v2.0/token",
-                                         form={"grant_type": "client_credentials", "client_id": m.actor["client_id"], "client_secret": secret["secretText"], "scope": "https://storage.azure.com/.default"})
-                        break
-                    except CredentialHTTPError as exc:
-                        if exc.status != 401 or 7000215 not in exc.numeric_codes or attempt == 3:
-                            raise
-                        time.sleep(15)
+                token, claims = acquire_initial_token(
+                    lambda timeout: request("POST", "https://login.microsoftonline.com/" + m.tenant_id + "/oauth2/v2.0/token",
+                        form={"grant_type": "client_credentials", "client_id": m.actor["client_id"], "client_secret": secret["secretText"], "scope": "https://storage.azure.com/.default"}, request_timeout=timeout),
+                    validate=lambda value: validate_actor_token(value, current, "storage"), record=record_initial_attempt)
             finally:
                 secret.clear()
-            token = result.pop("access_token")
-            result.clear()
-            claims = validate_actor_token(token, current, "storage")
             expiry = time.time() + duration + 600
             if claims["exp"] <= expiry:
                 raise SafetyError("Actor token cannot cover the complete cohort")

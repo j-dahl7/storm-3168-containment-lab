@@ -23,6 +23,7 @@ class ExportTests(unittest.TestCase):
         self.state = {"lab_id": self.m.lab_id, "subscription_id": self.m.subscription_id, "export_uuid": export_uuid,
                       "workspace_id": ae.workspace_id(self.m), "setting_id": ae.setting_id(self.m, export_uuid)}
         self.setting = None
+        self.provider_normalizes = False
         self.tag = self.m.lab_id
         self.calls, self.receipts = [], []
         self.worker = ae.ActivityExport(self.data, self, Operator())
@@ -34,12 +35,18 @@ class ExportTests(unittest.TestCase):
         if method == "GET":
             return Response(404) if self.setting is None else Response(200, json.dumps(self.setting).encode())
         if method == "PUT":
-            self.setting = {"id": self.state["setting_id"], **body}
+            self.setting = self.normalized_setting() if self.provider_normalizes else {"id": self.state["setting_id"], **body}
             return Response(200)
         if method == "DELETE":
             self.setting = None
             return Response(204)
         raise AssertionError(method)
+
+    def normalized_setting(self):
+        categories = ["Administrative", "Security", "ServiceHealth", "Alert", "Recommendation", "Policy", "Autoscale", "ResourceHealth"]
+        return {"id": self.state["setting_id"], "properties": {
+            "workspaceId": ae.workspace_id(self.m), "metrics": None,
+            "logs": [{"category": name, "categoryGroup": None, "enabled": name == "Administrative"} for name in categories]}}
 
     def perform(self, operation="create", ack=True):
         with patch.object(ae, "assert_owned"):
@@ -60,6 +67,65 @@ class ExportTests(unittest.TestCase):
         with self.assertRaisesRegex(SafetyError, "refusing overwrite"):
             self.perform()
         self.assertTrue(all(row[0] == "GET" for row in self.calls))
+
+    def test_provider_disabled_category_expansion_verifies_create_ack(self):
+        self.provider_normalizes = True
+        result = self.perform()
+        self.assertEqual(result["status"], "present_verified")
+        writes = [row for row in self.calls if row[0] == "PUT"]
+        self.assertEqual(len(writes), 1)
+        self.assertEqual(writes[0][2], ae.payload(self.m), "Request remains Administrative-only")
+        self.assertEqual(ae.enabled_categories(self.setting["properties"]["logs"]), {"administrative"})
+
+    def test_expanded_recorded_route_can_be_removed_without_workspace_lookup(self):
+        self.setting = self.normalized_setting()
+        self.tag = "workspace-unavailable"
+        with patch.object(ae, "assert_owned"):
+            result = ae.remove_recorded_export(self.data, self.state, self, Operator(), confirm_lab_id=self.m.lab_id,
+                persist=lambda s: self.receipts.append(copy.deepcopy(s)))
+        self.assertEqual(result["status"], "absent_verified")
+        self.assertEqual([row[1] for row in self.calls if row[0] == "DELETE"], [ae.ARM + self.state["setting_id"] + ae.API])
+        self.assertFalse(any("Microsoft.OperationalInsights/workspaces/" in row[1] for row in self.calls))
+
+    def test_explicit_disabled_metrics_are_accepted(self):
+        self.setting = self.normalized_setting()
+        self.setting["properties"]["metrics"] = [{"category": "AllMetrics", "enabled": False, "categoryGroup": None}]
+        self.assertEqual(self.perform("status")["status"], "present_verified")
+        self.assertTrue(all(row[0] == "GET" for row in self.calls))
+
+    def test_malformed_duplicate_grouped_or_enabled_extra_rows_refused(self):
+        mutations = [
+            lambda p: p["logs"][1].update(enabled=True),
+            lambda p: p["logs"][0].update(enabled=False),
+            lambda p: p["logs"].append({"category": "administrative", "enabled": False}),
+            lambda p: p["logs"].append({"category": "SECURITY", "enabled": False}),
+            lambda p: p["logs"][1].update(categoryGroup="allLogs"),
+            lambda p: p["logs"][1].update(categoryGroup=""),
+            lambda p: p["logs"][1].pop("enabled"),
+            lambda p: p["logs"][1].update(enabled="false"),
+            lambda p: p["logs"][1].update(enabled=0),
+            lambda p: p["logs"][1].update(category=None),
+            lambda p: p.update(logs=None),
+            lambda p: p.update(logs={"Administrative": True}),
+            lambda p: p.update(metrics=[{"category": "AllMetrics", "enabled": True}]),
+            lambda p: p.update(metrics=[{"category": "AllMetrics", "enabled": False}, {"category": "allmetrics", "enabled": False}]),
+            lambda p: p.update(metrics=[{"category": "AllMetrics", "enabled": "false"}]),
+            lambda p: p.update(metrics=[{"categoryGroup": "allMetrics", "enabled": False}]),
+            lambda p: p.update(metrics={}),
+            lambda p: p.update(storageAccountId="/other-storage"),
+            lambda p: p.update(eventHubAuthorizationRuleId="/other-hub"),
+            lambda p: p.update(marketplacePartnerId="/other-partner"),
+            lambda p: p.update(serviceBusRuleId="/legacy-destination"),
+            lambda p: p.update(storageAccountId=[]),
+        ]
+        for index, mutate in enumerate(mutations):
+            with self.subTest(case=index):
+                self.setting = self.normalized_setting()
+                self.calls.clear()
+                mutate(self.setting["properties"])
+                with self.assertRaisesRegex(SafetyError, "destination or categories changed"):
+                    self.perform("remove")
+                self.assertTrue(all(row[0] == "GET" for row in self.calls))
 
     def test_changed_destination_not_adopted_even_for_remove(self):
         self.setting = {"id": self.state["setting_id"], "properties": {"workspaceId": "/foreign", "logs": [{"category": "Administrative", "enabled": True}]}}

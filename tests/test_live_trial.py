@@ -13,6 +13,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 import live_trial
+from initial_token import acquire_initial_token, CredentialHTTPError, CredentialTransportError
 from test_core import token as fake_token
 from stormlab.core import utc_now, response_target, Manifest, claims_from_token
 
@@ -23,7 +24,8 @@ KEY = "88888888-8888-4888-8888-888888888888"
 
 
 class LiveTrialProtocolTests(unittest.TestCase):
-    def exercise(self, *, action="sp-disable", capability="arm-tag-write", baseline_count=2, lost_creation_reply=False, cleanup_interrupt=False, post_interrupt=False, executor_cleanup=True):
+    def exercise(self, *, action="sp-disable", capability="arm-tag-write", baseline_count=2, lost_creation_reply=False, cleanup_interrupt=False, post_interrupt=False, executor_cleanup=True,
+                 initial_errors=(), new_token_error=None):
         (ROOT / "private").mkdir(exist_ok=True)
         with tempfile.TemporaryDirectory(dir=ROOT / "private") as temp:
             manifest_path = Path(temp) / "manifest.json"
@@ -45,10 +47,11 @@ class LiveTrialProtocolTests(unittest.TestCase):
                         created_run_dirs.append(candidate)
                 return candidate
 
-            def request(method, url, token=None, payload=None, form=None):
+            def request(method, url, token=None, payload=None, form=None, **kwargs):
                 if url.endswith("/addPassword"):
                     name = payload["passwordCredential"]["displayName"]
                     state["credentials"] = [{"keyId": KEY, "displayName": name}]
+                    state["secret_expiry"] = payload["passwordCredential"]["endDateTime"]
                     if lost_creation_reply:
                         raise RuntimeError("transport failure after remote creation")
                     return {"keyId": KEY, "secretText": "fictional-in-memory-secret"}
@@ -60,6 +63,10 @@ class LiveTrialProtocolTests(unittest.TestCase):
                     return {}
                 if "oauth2/v2.0/token" in url:
                     state["token_calls"] += 1
+                    if state["responded"] and new_token_error:
+                        raise new_token_error
+                    if state["token_calls"] <= len(initial_errors):
+                        raise initial_errors[state["token_calls"] - 1]
                     issued = fake_token(exp=time.time() + 3600, iat=time.time(), jti=str(state["token_calls"]), aud=form["scope"].removesuffix(".default"))
                     state["issued"].append(issued)
                     return {"access_token": issued}
@@ -120,12 +127,17 @@ class LiveTrialProtocolTests(unittest.TestCase):
             if action == "manual-executor":
                 argv.extend(["--role-assignment-id", assignment_id])
             failure = None
+            acquisition_clock = [0.0]
+            def bounded_initial(*args, **kwargs):
+                return acquire_initial_token(*args, **kwargs, clock=lambda: acquisition_clock[0],
+                    sleeper=lambda seconds: acquisition_clock.__setitem__(0, acquisition_clock[0] + seconds))
             with patch.object(sys, "argv", argv), patch.object(live_trial, "load_owned", return_value=(manifest_path, manifest)), \
                  patch.object(live_trial, "private_path", side_effect=isolated_private_path), \
                  patch.object(live_trial, "assert_owned"), patch.object(live_trial, "graph_token", return_value="operator-only"), \
                  patch.object(live_trial, "begin_trial"), patch.object(live_trial, "finish_trial") as finished, \
                  patch.object(live_trial, "assert_storage_window", return_value={"valid": True}) as prepared, \
                  patch.object(live_trial, "request", side_effect=request), patch.object(live_trial, "invoke_harness", side_effect=harness), \
+                 patch.object(live_trial, "acquire_initial_token", side_effect=bounded_initial), \
                  patch.object(live_trial.manual_executor_trial, "load_bound_state", return_value=(Path(temp) / "responder.json", {}, executor_target)), \
                  patch.object(live_trial.manual_executor_trial, "invoke", side_effect=executor), \
                  patch.object(live_trial.subprocess, "run", return_value=SimpleNamespace(returncode=0, stdout="a" * 40)), \
@@ -156,6 +168,47 @@ class LiveTrialProtocolTests(unittest.TestCase):
         self.assertNotEqual(state["issued"][0], state["issued"][1])
         self.assertEqual(receipt["separate_new_token_check"]["status"], "issued")
         self.assertTrue(receipt["action_receipt"]["postcondition_verified"])
+
+    def test_initial_transient_retries_freeze_one_token_and_cleanup_once(self):
+        errors = [CredentialTransportError(), CredentialHTTPError(429, "temporarily_unavailable", []), CredentialHTTPError(401, "invalid_client", [7000215])]
+        state, receipt, failure = self.exercise(initial_errors=errors)
+        self.assertIsNone(failure)
+        self.assertEqual(receipt["initial_token_attempts"], 4)
+        self.assertEqual(len(receipt["initial_token_acquisition"]), 4)
+        self.assertEqual(state["tokens"], [state["issued"][0], state["issued"][0]])
+        self.assertEqual(len(state["issued"]), 2)  # One initial token plus the separate new-token control.
+        self.assertEqual(sum(r.get("token_frozen") is True for r in receipt["initial_token_acquisition"]), 1)
+
+    def test_initial_nonretryable_auth_failure_never_probes_or_responds(self):
+        state, receipt, failure = self.exercise(initial_errors=[CredentialHTTPError(401, "invalid_client", [7000222])])
+        self.assertIsNotNone(failure)
+        self.assertEqual(state["token_calls"], 1)
+        self.assertEqual(state["tokens"], [])
+        self.assertFalse(state["responded"])
+        self.assertTrue(receipt["credential_removed"])
+
+    def test_initial_retry_exhaustion_preserves_cleanup_without_response(self):
+        state, receipt, failure = self.exercise(initial_errors=[CredentialTransportError()] * 100)
+        self.assertIsNotNone(failure)
+        self.assertFalse(state["responded"])
+        self.assertEqual(state["tokens"], [])
+        self.assertTrue(receipt["credential_removed"])
+        self.assertEqual(receipt["initial_token_acquisition"][-1]["terminal_reason"], "budget_exhausted_before_next_attempt")
+
+    def test_post_action_new_token_check_is_still_one_shot(self):
+        state, receipt, failure = self.exercise(new_token_error=CredentialTransportError())
+        self.assertIsNone(failure)
+        self.assertEqual(state["token_calls"], 2)
+        self.assertEqual(receipt["initial_token_attempts"], 1)
+        self.assertEqual(receipt["separate_new_token_check"]["attempts"], 1)
+        self.assertEqual(receipt["separate_new_token_check"]["status"], "transport_error_or_unknown")
+
+    def test_temporary_secret_expiry_is_outside_maximum_observation(self):
+        state, receipt, failure = self.exercise()
+        self.assertIsNone(failure)
+        self.assertEqual(receipt["temporary_credential_ttl_seconds"], 10800)
+        self.assertEqual(receipt["temporary_credential_expires_at"], state["secret_expiry"])
+        self.assertNotIn("fictional-in-memory-secret", json.dumps(receipt))
 
     def test_one_baseline_success_is_insufficient_and_cleanup_still_runs(self):
         state, receipt, failure = self.exercise(baseline_count=1)

@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+import re
 import sys
 import uuid
 from lab_support import ROOT, assert_owned, private_path, save
@@ -29,6 +30,33 @@ def setting_id(m: Manifest, export_uuid: str) -> str:
 
 def payload(m: Manifest) -> dict:
     return {"properties": {"workspaceId": workspace_id(m), "logs": [{"category": "Administrative", "enabled": True}], "metrics": []}}
+
+
+def enabled_categories(rows: object, *, allow_null: bool = False) -> set[str] | None:
+    """Normalize explicit provider category rows; None means malformed/ambiguous.
+
+    Azure may expand omitted categories as disabled rows and return metrics:null.
+    Missing/nonboolean enabled flags, category groups, and duplicate names are
+    never interpreted as disabled. Matching names is case-insensitive.
+    """
+    if rows is None and allow_null:
+        rows = []
+    if not isinstance(rows, list) or len(rows) > 64:
+        return None
+    seen, enabled = set(), set()
+    for row in rows:
+        if not isinstance(row, dict) or type(row.get("enabled")) is not bool:
+            return None
+        category = row.get("category")
+        if not isinstance(category, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9_.-]{0,127}", category) or row.get("categoryGroup") is not None:
+            return None
+        normalized = category.lower()
+        if normalized in seen:
+            return None
+        seen.add(normalized)
+        if row["enabled"]:
+            enabled.add(normalized)
+    return enabled
 
 
 def validate_state(m: Manifest, state: dict) -> None:
@@ -63,13 +91,12 @@ class ActivityExport:
             raise SafetyError("Activity export existence is unknown")
         item = response.data()
         p = item.get("properties", {})
-        logs = p.get("logs")
-        if (str(item.get("id", "")).lower() != state["setting_id"].lower()
+        if (not isinstance(p, dict)
+                or str(item.get("id", "")).lower() != state["setting_id"].lower()
                 or str(p.get("workspaceId", "")).lower() != workspace_id(self.m).lower()
-                or not isinstance(logs, list) or len(logs) != 1
-                or logs[0].get("category") != "Administrative" or logs[0].get("enabled") is not True
-                or logs[0].get("categoryGroup")
-                or p.get("metrics", []) or any(p.get(k) for k in ("storageAccountId", "eventHubAuthorizationRuleId", "eventHubName", "marketplacePartnerId"))):
+                or enabled_categories(p.get("logs")) != {"administrative"}
+                or enabled_categories(p.get("metrics"), allow_null=True) != set()
+                or any(p.get(k) not in (None, "") for k in ("storageAccountId", "eventHubAuthorizationRuleId", "eventHubName", "marketplacePartnerId", "serviceBusRuleId"))):
             raise SafetyError("Recorded activity export identity, destination or categories changed")
         return item
 
